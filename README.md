@@ -87,7 +87,7 @@ GitHub public repository 只包含程序源码、静态前端和测试。Codex �
 | `CODEX_WORKDIR` | 空 | Codex 工作目录 |
 | `CODEX_EXTRA_ARGS` | 空 | 额外 CLI 参数 |
 | `CODEX_TIMEOUT_SECONDS` | `600` | 单个翻译块超时 |
-| `CODEX_CHUNK_CHARS` | `2600` | 单个翻译块的最大字符数 |
+| `CODEX_CHUNK_CHARS` | `1600` | 单个翻译块的最大字符数，减少单块保护标记数量 |
 | `CODEX_MAX_PARALLEL_CHUNKS` | `3` | 同一 TeX 文件同时翻译的块数 |
 | `CODEX_REASONING_EFFORT` | `medium` | Codex CLI 的 reasoning effort |
 
