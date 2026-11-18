@@ -68,6 +68,12 @@ def test_control_word_is_separated_from_adjacent_chinese_text() -> None:
     assert translated.startswith(r"\large ")
 
 
+def test_control_word_spacing_does_not_change_protected_structure() -> None:
+    source = r"\large English 中文"
+    translated, _ = translate_latex(source, FakeTranslator())
+    validate_protected_structure(source, translated)
+
+
 def test_emph_command_is_not_split_by_cjk_spacing() -> None:
     translated, _ = translate_latex(r"\emph{English} 中文", FakeTranslator())
     assert r"\emph{English}" in translated

@@ -495,6 +495,8 @@ Compiler log:
                         on_chunk_cached=lambda _key, _entry: self._persist_chunk_progress(job, translator, translation_cache, cache_path),
                     )
                     translated = translated_main + original[marker.end() :]
+                    validation_source = main_source
+                    validation_result = translated_main
                     appendix_files.add(relative_name)
                 elif marker and job.translate_appendix and not appendix_file:
                     working = tex_file.read_text(encoding="utf-8", errors="replace")
@@ -509,6 +511,8 @@ Compiler log:
                         on_chunk_cached=lambda _key, _entry: self._persist_chunk_progress(job, translator, translation_cache, cache_path),
                     )
                     translated = working[: working.find("\\appendix") + len("\\appendix")] + translated_appendix
+                    validation_source = original
+                    validation_result = translated
                 else:
                     file_cache = translation_cache.setdefault(relative_name, {})
                     translated, stats = translate_latex(
@@ -520,16 +524,18 @@ Compiler log:
                         chunk_cache=file_cache,
                         on_chunk_cached=lambda _key, _entry: self._persist_chunk_progress(job, translator, translation_cache, cache_path),
                     )
+                    validation_source = original
+                    validation_result = translated
                 self._set_codex_status("connected", "最近一次 Codex CLI 调用成功")
                 try:
-                    validate_protected_structure(original, translated)
+                    validate_protected_structure(validation_source, validation_result)
                 except ProtectedRegionError as exc:
-                    self._log(log_path, f"protected-structure fallback: {relative_name}: {exc}")
-                    translated = original
-                    translation_cache.pop(relative_name, None)
-                    translation_cache.pop(f"{relative_name}::appendix", None)
-                    self._persist_chunk_progress(job, translator, translation_cache, cache_path)
-                    stats = type(stats)(stats.chunks, stats.characters, stats.fallbacks + 1)
+                    self._log(log_path, f"protected-structure validation failed: {relative_name}: {exc}")
+                    raise
+                if not appendix_file and looks_untranslated(validation_source, validation_result):
+                    error = "翻译结果仍包含未翻译的英文段落，已阻止该文件进入编译"
+                    self._log(log_path, f"translation-completeness validation failed: {relative_name}: {error}")
+                    raise ProtectedRegionError(error)
                 tex_file.write_text(translated, encoding="utf-8")
                 if not marker or job.translate_appendix:
                     translated_files.add(relative_name)

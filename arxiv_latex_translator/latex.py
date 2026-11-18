@@ -464,16 +464,19 @@ def looks_untranslated(original: str, translated: str, *, require_no_cjk: bool =
 def _separate_control_words(text: str) -> str:
     """Keep TeX control words from consuming adjacent CJK text."""
 
-    text = re.sub(r"(\\[A-Za-z@]+)(?=[\u3400-\u9fff])", r"\1 ", text)
-    text = re.sub(r"\\(?:newblock|item|large|small|normalsize|bfseries|itshape|em|rmfamily|sffamily|ttfamily|centering|raggedright)(?![A-Za-z@])(?=[A-Za-z])", lambda match: match.group(0) + " ", text)
     tokens = tokenize_latex(text)
     separated: list[str] = []
     for index, token in enumerate(tokens):
         value = token.value
         if token.kind == "translatable" and index > 0 and re.match(r"[\u3400-\u9fff]", value):
             previous = tokens[index - 1]
-            if previous.kind == "protected" and re.search(r"\\(?:item|large|small|normalsize|bfseries|itshape|em|rmfamily|sffamily|ttfamily|centering|raggedright)$", previous.value):
+            if previous.kind == "protected" and re.search(r"\\(?:item|large|small|normalsize|bfseries|itshape|em|rmfamily|sffamily|ttfamily|centering|raggedright)\s*$", previous.value):
                 value = " " + value
+        if token.kind == "translatable" and index > 0 and re.match(r"[A-Za-z\u3400-\u9fff]", value):
+            previous = tokens[index - 1]
+            if previous.kind == "protected" and re.search(r"\\(?:item|large|small|normalsize|bfseries|itshape|em|rmfamily|sffamily|ttfamily|centering|raggedright)\s*$", previous.value):
+                if not previous.value.endswith((" ", "\n", "\t")):
+                    value = " " + value
         separated.append(value)
     return "".join(separated)
 
@@ -610,4 +613,6 @@ def translate_latex(
                     on_chunk_cached(str(chunk_index), entry)
             if first_error is not None:
                 raise first_error
-    return _separate_control_words("".join(translated_chunks)), TranslationStats(len(chunks), translated_characters, fallback_count)
+    raw_result = "".join(translated_chunks)
+    validate_protected_structure(text, raw_result)
+    return _separate_control_words(raw_result), TranslationStats(len(chunks), translated_characters, fallback_count)
