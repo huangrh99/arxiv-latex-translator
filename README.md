@@ -77,7 +77,7 @@ GitHub public repository 只包含程序源码、静态前端和测试。Codex �
 
 ## Codex CLI 配置
 
-默认适配器执行 `codex exec --skip-git-repo-check --sandbox read-only --ephemeral --color never -`。可用环境变量配置：
+默认适配器执行持久化的 `codex exec --skip-git-repo-check --sandbox read-only --color never --json -`，reasoning effort 固定默认为 `medium`。保护标记校验失败时会优先 `codex exec resume` 继续原会话，旧会话不可用时自动创建新调用。可用环境变量配置：
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
@@ -108,9 +108,9 @@ GitHub public repository 只包含程序源码、静态前端和测试。Codex �
 
 完成任务后，页面会提供中文译文 PDF、原文 arXiv PDF、翻译源码和编译日志。通过「对照阅读」可以在同一页面左右打开原文 PDF 与中文译文 PDF。原文 PDF 由 arXiv 在线提供，中文 PDF 由本服务生成并在线提供。
 
-失败任务可以点击「复用源码重试」。重试会保留已下载的源码归档、解压目录和已经完成的 TeX 文件，只继续未完成的翻译并重新编译。Codex CLI 的每次翻译调用仍然是独立的 CLI 调用，不会恢复旧的 Codex 对话线程。
+失败任务可以点击「复用源码重试」。重试会保留已下载的源码归档、解压目录、片段缓存和已经完成的 TeX 文件，只继续未完成的翻译并重新编译。任务会持久化最近的 Codex thread ID，优先使用 `codex exec resume`，会话失效时回退到新的 CLI 调用。
 
-翻译默认跳过路径或文件名包含 `appendix` 的 TeX 文件，以减少首次翻译的 token 消耗。主文完成后，页面会显示「继续翻译 Appendix」按钮，点击后只处理这些 Appendix 文件并重新编译 PDF。每个 TeX 文件的已完成片段会写入任务目录的缓存，重试时不会重复调用 Codex。
+翻译默认跳过路径或文件名包含 `appendix` 的 TeX 文件，也会跳过同一 TeX 文件中 `\appendix` 后面的内容，以减少首次翻译的 token 消耗。主文完成后，页面会显示「继续翻译 Appendix」按钮，点击后只处理这些 Appendix 内容并重新编译 PDF。每个 TeX 文件的已完成片段会写入任务目录的缓存，重试时不会重复调用 Codex。
 
 如果 Codex 多次破坏保护标记，系统会自动保留该片段的原文并继续处理其他片段，避免整个任务因为单个片段停住。完成消息会标出保留原文的片段数量，日志中也会记录 fallback 计数。
 

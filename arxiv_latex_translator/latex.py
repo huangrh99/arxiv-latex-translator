@@ -6,6 +6,8 @@ import re
 from dataclasses import dataclass
 from typing import Callable, Protocol
 
+from .translator import TranslationError
+
 
 class ChunkTranslator(Protocol):
     def translate(self, prompt: str, *, cwd=None) -> str:
@@ -417,7 +419,21 @@ def translate_latex(
         retry_prompt = prompt + f"\nThe required marker sequence is exactly: {marker_order}\n"
         for _ in range(3):
             try:
-                translated = translator.translate(retry_prompt, cwd=cwd)
+                use_resume = (
+                    hasattr(translator, "resume")
+                    and getattr(translator, "last_session_id", None)
+                    and (last_error is not None or getattr(translator, "resume_next", False))
+                )
+                if use_resume:
+                    try:
+                        translated = translator.resume(retry_prompt, cwd=cwd)
+                    except TranslationError:
+                        # A persisted thread may have expired. Start a fresh
+                        # turn and keep the source/cache fallback path alive.
+                        translated = translator.translate(retry_prompt, cwd=cwd)
+                    translator.resume_next = False
+                else:
+                    translated = translator.translate(retry_prompt, cwd=cwd)
                 translated = _replace_markers(translated, protected)
                 break
             except ProtectedRegionError as exc:

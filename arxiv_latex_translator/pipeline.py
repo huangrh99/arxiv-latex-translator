@@ -43,6 +43,7 @@ class Job:
     translated_files: list[str] = field(default_factory=list)
     appendix_files: list[str] = field(default_factory=list)
     translate_appendix: bool = False
+    codex_session_id: str | None = None
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
 
@@ -215,7 +216,11 @@ class JobManager:
             if job.status != "failed":
                 raise RuntimeError("只有失败任务可以重试")
             if job.attempts >= 3:
-                raise RuntimeError("该任务已达到三次尝试上限")
+                if not job.error or "保护结构" not in job.error:
+                    raise RuntimeError("该任务已达到三次尝试上限")
+                # Allow one migration retry for jobs stopped by the old
+                # marker-structure bug. The new fallback path is resumable.
+                job.attempts = 0
             job.status = "queued"
             job.phase = "queued"
             job.progress = min(job.progress, 89)
@@ -307,6 +312,10 @@ class JobManager:
         parts = [part.casefold() for part in Path(relative_name).parts]
         return any("appendix" in part for part in parts)
 
+    @staticmethod
+    def _appendix_marker(text: str) -> re.Match[str] | None:
+        return re.search(r"(?m)^\s*\\appendix\b", text)
+
     def _run(self, job: Job, *, resume: bool = False) -> None:
         job_dir = self._job_dir(job.id)
         log_path = job_dir / "job.log"
@@ -349,7 +358,13 @@ class JobManager:
             if not translated_dir.exists():
                 shutil.copytree(extracted_dir, translated_dir)
             translated_root = translated_dir / root.relative_to(extracted_dir)
-            translator = CodexCliTranslator()
+            def remember_session(session_id: str) -> None:
+                self._update(job, codex_session_id=session_id)
+
+            translator = CodexCliTranslator(on_session_started=remember_session)
+            if resume and job.codex_session_id:
+                translator.last_session_id = job.codex_session_id
+                translator.resume_next = True
             translator.total_usage = TokenUsage(
                 input_tokens=job.input_tokens,
                 cached_input_tokens=job.cached_input_tokens,
@@ -370,11 +385,6 @@ class JobManager:
                 except (OSError, ValueError):
                     translation_cache = {}
 
-            def persist_translation_cache() -> None:
-                temp = cache_path.with_suffix(".tmp")
-                temp.write_text(json.dumps(translation_cache, ensure_ascii=False), encoding="utf-8")
-                temp.replace(cache_path)
-
             total_chunks = 0
             total_characters = 0
             total_fallbacks = 0
@@ -385,20 +395,49 @@ class JobManager:
                     continue
                 if relative_name in translated_files:
                     continue
-                original = tex_file.read_text(encoding="utf-8", errors="replace")
-                file_cache = translation_cache.setdefault(relative_name, {})
-                translated, stats = translate_latex(
-                    original,
-                    translator,
-                    max_chars=chunk_chars,
-                    cwd=job_dir,
-                    chunk_cache=file_cache,
-                    on_chunk_cached=lambda _key, _entry: persist_translation_cache(),
-                )
+                source_tex_file = extracted_dir / tex_file.relative_to(translated_dir)
+                original = source_tex_file.read_text(encoding="utf-8", errors="replace")
+                marker = self._appendix_marker(original)
+                if marker and not job.translate_appendix:
+                    main_source = original[: marker.end()]
+                    main_cache = translation_cache.setdefault(relative_name, {})
+                    translated_main, stats = translate_latex(
+                        main_source,
+                        translator,
+                        max_chars=chunk_chars,
+                        cwd=job_dir,
+                        chunk_cache=main_cache,
+                        on_chunk_cached=lambda _key, _entry: self._persist_chunk_progress(job, translator, translation_cache, cache_path),
+                    )
+                    translated = translated_main + original[marker.end() :]
+                    appendix_files.add(relative_name)
+                elif marker and job.translate_appendix:
+                    working = tex_file.read_text(encoding="utf-8", errors="replace")
+                    appendix_cache = translation_cache.setdefault(f"{relative_name}::appendix", {})
+                    translated_appendix, stats = translate_latex(
+                        original[marker.end() :],
+                        translator,
+                        max_chars=chunk_chars,
+                        cwd=job_dir,
+                        chunk_cache=appendix_cache,
+                        on_chunk_cached=lambda _key, _entry: self._persist_chunk_progress(job, translator, translation_cache, cache_path),
+                    )
+                    translated = working[: working.find("\\appendix") + len("\\appendix")] + translated_appendix
+                else:
+                    file_cache = translation_cache.setdefault(relative_name, {})
+                    translated, stats = translate_latex(
+                        original,
+                        translator,
+                        max_chars=chunk_chars,
+                        cwd=job_dir,
+                        chunk_cache=file_cache,
+                        on_chunk_cached=lambda _key, _entry: self._persist_chunk_progress(job, translator, translation_cache, cache_path),
+                    )
                 self._set_codex_status("connected", "最近一次 Codex CLI 调用成功")
                 tex_file.write_text(translated, encoding="utf-8")
                 validate_protected_structure(original, translated)
-                translated_files.add(relative_name)
+                if not marker or job.translate_appendix:
+                    translated_files.add(relative_name)
                 total_chunks += stats.chunks
                 total_characters += stats.characters
                 total_fallbacks += stats.fallbacks
@@ -467,4 +506,25 @@ class JobManager:
                 message = "Codex CLI 认证失效，请重新登录" if status == "disconnected" else detail[-500:]
                 self._set_codex_status(status, message)
             self._update(job, status="failed", phase="failed", message="任务失败", error=str(exc), log_path=str(log_path))
+
+    def _persist_chunk_progress(
+        self,
+        job: Job,
+        translator: CodexCliTranslator,
+        translation_cache: dict[str, dict[str, dict[str, str]]],
+        cache_path: Path,
+    ) -> None:
+        temp = cache_path.with_suffix(".tmp")
+        temp.write_text(json.dumps(translation_cache, ensure_ascii=False), encoding="utf-8")
+        temp.replace(cache_path)
+        usage = translator.total_usage
+        self._update(
+            job,
+            codex_session_id=translator.last_session_id,
+            input_tokens=usage.input_tokens,
+            cached_input_tokens=usage.cached_input_tokens,
+            output_tokens=usage.output_tokens,
+            reasoning_output_tokens=usage.reasoning_output_tokens,
+            total_tokens=usage.total_tokens,
+        )
 

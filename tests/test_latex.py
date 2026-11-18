@@ -1,6 +1,10 @@
 import pytest
+import subprocess
+import re
+import json
 
 from arxiv_latex_translator.latex import tokenize_latex, translate_latex, validate_protected_structure
+from arxiv_latex_translator.translator import CodexCliTranslator, CodexConfig
 
 
 class FakeTranslator:
@@ -76,6 +80,26 @@ def test_marker_failure_falls_back_to_original_chunk() -> None:
     translated, stats = translate_latex(r"\section{Text} $x$", BrokenTranslator())
     assert translated == r"\section{Text} $x$"
     assert stats.fallbacks == 1
+
+
+def test_marker_retry_resumes_the_codex_thread() -> None:
+    commands = []
+
+    def runner(command, **kwargs):
+        commands.append(command)
+        if len(commands) == 1:
+            output = '{"type":"thread.started","thread_id":"thread-1"}\n{"type":"item.completed","item":{"type":"agent_message","text":"broken"}}\n'
+        else:
+            prompt = kwargs["input"]
+            content = prompt.split("<latex>\n", 1)[1].rsplit("\n</latex>", 1)[0]
+            output = json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": content}}) + "\n"
+        return subprocess.CompletedProcess(command, 0, output, "")
+
+    translator = CodexCliTranslator(CodexConfig(), runner=runner)
+    translated, _ = translate_latex(r"Text $x$", translator)
+    assert translated == r"Text $x$"
+    assert commands[1][2] == "resume"
+    assert "thread-1" in commands[1]
 
 
 def test_inline_verbatim_and_protected_structure_are_preserved() -> None:
