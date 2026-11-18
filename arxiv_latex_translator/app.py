@@ -72,6 +72,9 @@ class TranslatorHandler(BaseHTTPRequestHandler):
         if path == "/compare.html":
             self._send_file(STATIC_DIR / "compare.html", "text/html; charset=utf-8", STATIC_DIR, head_only=True)
             return
+        if path == "/reader.html":
+            self._send_file(STATIC_DIR / "reader.html", "text/html; charset=utf-8", STATIC_DIR, head_only=True)
+            return
         parts = path.split("/")
         if len(parts) == 5 and parts[1:3] == ["api", "jobs"]:
             job = self.manager.get(parts[3])
@@ -103,6 +106,9 @@ class TranslatorHandler(BaseHTTPRequestHandler):
             return
         if path == "/compare.html":
             self._send_file(STATIC_DIR / "compare.html", "text/html; charset=utf-8", STATIC_DIR)
+            return
+        if path == "/reader.html":
+            self._send_file(STATIC_DIR / "reader.html", "text/html; charset=utf-8", STATIC_DIR)
             return
         if path == "/api/jobs":
             query = parse_qs(parsed.query).get("query", [""])[0]
