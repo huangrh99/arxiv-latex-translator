@@ -69,6 +69,18 @@ def test_completed_translation_is_reused_for_same_arxiv_id(tmp_path: Path) -> No
     assert reused is job
 
 
+def test_history_groups_versions_and_prefers_completed_latest_version(tmp_path: Path) -> None:
+    manager = JobManager(tmp_path / "jobs")
+    older = Job(id="job-v1", source="2401.12345v1", arxiv_id="2401.12345v1", status="completed", updated_at=1)
+    newer_failed = Job(id="job-v2", source="2401.12345v2", arxiv_id="2401.12345v2", status="failed", updated_at=2)
+    manager._jobs[older.id] = older
+    manager._jobs[newer_failed.id] = newer_failed
+    history = manager.list()
+    assert len(history) == 1
+    assert history[0].arxiv_id == "2401.12345v1"
+    assert history[0].to_dict()["display_arxiv_id"] == "2401.12345"
+
+
 def test_retry_preserves_completed_translation_files(tmp_path: Path) -> None:
     manager = JobManager(tmp_path / "jobs")
     job = Job(

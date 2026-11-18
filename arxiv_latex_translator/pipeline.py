@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import threading
 import time
@@ -50,6 +51,10 @@ class Job:
         value.pop("log_path", None)
         value["arxiv_url"] = f"https://arxiv.org/abs/{self.arxiv_id}"
         value["original_pdf_url"] = f"https://arxiv.org/pdf/{self.arxiv_id}"
+        try:
+            value["display_arxiv_id"] = parse_arxiv_input(self.arxiv_id).base_id
+        except ValueError:
+            value["display_arxiv_id"] = self.arxiv_id
         if self.pdf_path:
             value["pdf_url"] = f"/api/jobs/{self.id}/pdf"
         if self.source_path:
@@ -231,12 +236,34 @@ class JobManager:
             jobs = [
                 job
                 for job in jobs
-                if needle in job.arxiv_id.casefold()
+                if needle in parse_arxiv_input(job.arxiv_id).base_id.casefold()
+                or needle in job.arxiv_id.casefold()
                 or needle in job.source.casefold()
                 or needle in job.id.casefold()
             ]
-        jobs.sort(key=lambda job: job.updated_at, reverse=True)
-        return jobs[: max(limit, 0)]
+        grouped: dict[str, Job] = {}
+        for job in jobs:
+            try:
+                identifier = parse_arxiv_input(job.arxiv_id)
+                key = identifier.base_id
+                version_match = re.search(r"v(\d+)$", identifier.value)
+                version = int(version_match.group(1)) if version_match else 0
+            except ValueError:
+                key = job.arxiv_id
+                version = 0
+            current = grouped.get(key)
+            if current is None:
+                grouped[key] = job
+                continue
+            current_version_match = re.search(r"v(\d+)$", current.arxiv_id)
+            current_version = int(current_version_match.group(1)) if current_version_match else 0
+            current_rank = (current.status == "completed", current_version, current.updated_at)
+            candidate_rank = (job.status == "completed", version, job.updated_at)
+            if candidate_rank > current_rank:
+                grouped[key] = job
+        result = list(grouped.values())
+        result.sort(key=lambda job: job.updated_at, reverse=True)
+        return result[: max(limit, 0)]
 
     def _update(self, job: Job, **changes: Any) -> None:
         with self._lock:
