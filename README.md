@@ -1,6 +1,6 @@
 # ArXiv LaTeX Translator
 
-本地运行的 arXiv LaTeX 翻译工具。输入 arXiv 链接或 ID，下载源码后使用 Codex CLI 翻译正文、标题、章节标题和 figure/table caption，并编译出中文 PDF。
+本地运行的 arXiv LaTeX 翻译工具。输入 arXiv 链接或 ID，下载源码后使用 Codex CLI 翻译正文、章节标题和 figure/table caption，并编译出中文 PDF。源码注释会从翻译输出中移除，论文标题和作者信息保持原文。
 
 ## 启动
 

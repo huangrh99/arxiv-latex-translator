@@ -72,6 +72,26 @@ def test_emph_command_is_not_split_by_cjk_spacing() -> None:
     assert r"\em ph" not in translated
 
 
+def test_comments_are_removed_and_title_stays_original() -> None:
+    source = r"""\title{English Title} % remove this comment
+Plain text % remove inline comment
+\begin{comment}
+Do not keep this block.
+\end{comment}
+\verb|% keep this literal|"""
+    translated, _ = translate_latex(source, FakeTranslator())
+    assert r"\title{English Title}" in translated
+    assert "remove this comment" not in translated
+    assert "Do not keep this block" not in translated
+    assert r"\verb|% keep this literal|" in translated
+
+
+def test_percent_in_url_is_not_treated_as_a_comment() -> None:
+    translated, _ = translate_latex(r"\url{https://example.com/a%20b} Text % comment", FakeTranslator())
+    assert r"\url{https://example.com/a%20b}" in translated
+    assert "comment" not in translated
+
+
 def test_marker_failure_falls_back_to_original_chunk() -> None:
     class BrokenTranslator:
         def translate(self, prompt: str, *, cwd=None) -> str:
