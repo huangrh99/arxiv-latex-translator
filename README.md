@@ -69,9 +69,9 @@ tailscale serve --bg --set-path /arxiv-translator 8000
 
 ## 数据和凭据边界
 
-GitHub private repository 只包含程序源码、静态前端和测试。Codex 登录凭据保存在运行机器的 `~/.codex/auth.json`，不会放进仓库。论文源码、翻译后的源码、PDF、日志和 `job.json` 都应该放在仓库之外的任务目录。不要把 `auth.json`、`.env`、生成的 PDF 或 `data/` 目录手动加入 Git。
+GitHub public repository 只包含程序源码、静态前端和测试。Codex 登录凭据保存在运行机器的 `~/.codex/auth.json`，不会放进仓库。论文源码、翻译后的源码、PDF、日志和 `job.json` 都应该放在仓库之外的任务目录。不要把 `auth.json`、`.env`、生成的 PDF 或 `data/` 目录手动加入 Git。
 
-私有代码仓库和私有运行服务是两件事。GitHub private repository 保护源码访问，Tailscale tailnet 或其他访问控制保护 Mac mini 后端和论文内容。
+公开代码仓库只公开程序实现。Tailscale tailnet 或其他访问控制仍然负责保护 Mac mini 后端和论文内容，公开代码仓库不会让任务数据或登录凭据变得可见。
 
 任务状态会记录 Codex CLI 返回的 `input_tokens`、`cached_input_tokens`、`output_tokens`、`reasoning_output_tokens` 和 `total_tokens`。其中 `total_tokens` 按输入 token 加输出 token 计算，重复调用和保护标记修复调用也会计入。
 
