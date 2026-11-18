@@ -13,6 +13,21 @@ python3 -m arxiv_latex_translator.app
 
 项目只使用 Python 标准库。需要本机安装 `codex` 和 `latexmk`、`xelatex` 或 `tectonic`，并确保 Codex CLI 已完成登录。
 
+Codex CLI 登录：
+
+```bash
+codex login
+codex login status
+```
+
+如果服务运行在没有图形界面的 Mac mini，可以使用设备登录：
+
+```bash
+codex login --device-auth
+```
+
+按终端显示的链接和一次性验证码完成登录。登录凭据保存在用户目录的 `~/.codex/auth.json`，不属于项目仓库。
+
 运行测试：
 
 ```bash
