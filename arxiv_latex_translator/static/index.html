@@ -31,6 +31,12 @@
       .history-id { font-weight: 700; }
       .history-meta { color: #697589; font-size: 13px; margin-top: 6px; }
       .history-empty { color: #697589; padding: 12px 0; }
+      details { margin-top: 18px; color: #596579; }
+      summary { cursor: pointer; font-weight: 650; color: #39465d; }
+      .backend-row { display: flex; gap: 10px; align-items: center; margin-top: 10px; }
+      .backend-row input { flex: 1; }
+      .backend-row button { margin-top: 0; white-space: nowrap; }
+      .hint { margin: 8px 0 0; font-size: 13px; }
     </style>
   </head>
   <body>
@@ -44,6 +50,14 @@
             <input id="source" name="source" placeholder="例如 2401.12345 或 https://arxiv.org/abs/2401.12345" required>
             <button id="submit" type="submit">开始翻译</button>
           </form>
+          <details>
+            <summary>后端连接设置</summary>
+            <div class="backend-row">
+              <input id="backend-url" type="url" placeholder="例如 https://translator.example.com">
+              <button id="save-backend" type="button">保存地址</button>
+            </div>
+            <p class="hint">GitHub Pages 页面需要填入可从浏览器访问的 HTTPS 后端地址。地址只保存在当前浏览器。</p>
+          </details>
           <div id="status" hidden>
             <div id="message"></div>
             <progress id="progress" max="100" value="0"></progress>
@@ -68,8 +82,41 @@
       const links = document.getElementById('links');
       const historyQuery = document.getElementById('history-query');
       const historyList = document.getElementById('history-list');
-      const apiBase = window.location.protocol === 'file:' ? 'http://127.0.0.1:8000' : '';
+      const backendUrl = document.getElementById('backend-url');
+      const saveBackend = document.getElementById('save-backend');
+      const queryApiBase = new URLSearchParams(window.location.search).get('api') || '';
+      const storedApiBase = readStoredApiBase();
+      const configuredApiBase = window.ARXIV_API_BASE || queryApiBase || storedApiBase;
+      let apiBase = (configuredApiBase || (window.location.protocol === 'file:' ? 'http://127.0.0.1:8000' : '')).replace(/\/+$/, '');
       let timer;
+
+      backendUrl.value = apiBase;
+
+      function readStoredApiBase() {
+        try {
+          return localStorage.getItem('arxiv-translator-api-base') || '';
+        } catch (error) {
+          return '';
+        }
+      }
+
+      function storeApiBase(value) {
+        try {
+          localStorage.setItem('arxiv-translator-api-base', value);
+        } catch (error) {
+          // Some file:// browser contexts disable local storage.
+        }
+      }
+
+      function connectionMessage() {
+        return apiBase ? `无法连接后端，请检查 ${apiBase} 是否正在运行并允许跨域访问` : '无法连接后端，请先配置后端地址';
+      }
+
+      saveBackend.addEventListener('click', () => {
+        apiBase = backendUrl.value.trim().replace(/\/+$/, '');
+        storeApiBase(apiBase);
+        loadHistory();
+      });
 
       function apiUrl(path) {
         return `${apiBase}${path}`;
@@ -104,7 +151,7 @@
           const data = await response.json();
           renderHistory(data.jobs || []);
         } catch (error) {
-          historyList.innerHTML = '<div class="history-empty">无法连接本地服务，请确认 http://127.0.0.1:8000 正在运行</div>';
+          historyList.innerHTML = `<div class="history-empty">${escapeHtml(connectionMessage())}</div>`;
         }
       }
 
@@ -135,7 +182,7 @@
         } catch (error) {
           statusBox.hidden = false;
           message.className = 'error';
-          message.textContent = '无法连接本地服务，请确认 http://127.0.0.1:8000 正在运行';
+          message.textContent = connectionMessage();
         }
       }
 
@@ -149,7 +196,7 @@
         } catch (error) {
           statusBox.hidden = false;
           message.className = 'error';
-          message.textContent = '无法连接本地服务，请确认 http://127.0.0.1:8000 正在运行';
+          message.textContent = connectionMessage();
           button.disabled = false;
           return;
         }

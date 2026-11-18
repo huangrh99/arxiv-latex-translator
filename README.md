@@ -13,6 +13,21 @@ python3 -m arxiv_latex_translator.app
 
 项目只使用 Python 标准库。需要本机安装 `codex` 和 `latexmk` 或 `xelatex`，并确保 Codex CLI 已完成登录。
 
+## Mac mini 后端与 GitHub Pages 前端
+
+可以把后端和翻译结果放在 Mac mini，GitHub Pages 只托管不含论文数据的前端页面。Mac mini 上建议把任务目录放在 `papers-sync` 同步目录之外，例如：
+
+```bash
+ARXIV_HOST=127.0.0.1 \
+ARXIV_PORT=8000 \
+ARXIV_OUTPUT_DIR="$HOME/arxiv-latex-translator-data/jobs" \
+python3 -m arxiv_latex_translator.app
+```
+
+GitHub Pages 页面通过 `arxiv-translator/config.js` 中的 `window.ARXIV_API_BASE` 访问后端。该地址需要是浏览器可访问的 HTTPS 地址，并且后端需要允许 GitHub Pages 的跨域请求。纯 HTTP 的 Mac mini 内网地址会被 HTTPS 页面拦截，适合通过 Tailscale、Cloudflare Tunnel 或其他 HTTPS 反向代理提供访问。
+
+当前论文数据不会写入个人主页仓库。仓库根目录的 `.stignore` 也忽略 `arxiv-latex-translator/data/`，避免误把默认本地任务目录交给 Syncthing。
+
 任务状态会记录 Codex CLI 返回的 `input_tokens`、`cached_input_tokens`、`output_tokens`、`reasoning_output_tokens` 和 `total_tokens`。其中 `total_tokens` 按输入 token 加输出 token 计算，重复调用和保护标记修复调用也会计入。
 
 ## Codex CLI 配置
