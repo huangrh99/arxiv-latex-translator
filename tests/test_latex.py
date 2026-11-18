@@ -1,0 +1,70 @@
+import pytest
+
+from arxiv_latex_translator.latex import tokenize_latex, translate_latex, validate_protected_structure
+
+
+class FakeTranslator:
+    def translate(self, prompt: str, *, cwd=None) -> str:
+        content = prompt.split("<latex>\n", 1)[1].rsplit("\n</latex>", 1)[0]
+        return (
+            content.replace("Introduction", "介绍")
+            .replace("A figure", "一个图")
+            .replace("Plain text", "普通文本")
+            .replace("Short caption", "短标题")
+            .replace("Long caption", "长标题")
+        )
+
+
+def test_table_body_math_and_references_are_protected() -> None:
+    source = r"""\section{Introduction}
+Plain text $x^2$ \cite{paper}.
+\caption{A figure}
+\begin{tabular}{cc} A & B \\ C & D \end{tabular}
+"""
+    translated, stats = translate_latex(source, FakeTranslator())
+    assert "\\section{介绍}" in translated
+    assert "普通文本" in translated
+    assert "\\caption{一个图}" in translated
+    assert "$x^2$" in translated
+    assert "\\cite{paper}" in translated
+    assert "A & B" in translated
+    assert stats.chunks >= 1
+
+
+def test_tokenizer_keeps_macro_definition_as_one_protected_region() -> None:
+    tokens = tokenize_latex(r"\newcommand{\foo}[1]{#1 + 1}\section{Text}")
+    assert tokens[0].kind == "protected"
+    assert "\\newcommand" in tokens[0].value
+
+
+def test_href_url_stays_protected_and_optional_caption_text_is_translatable() -> None:
+    source = r"\caption[Short caption]{Long caption} \href{https://example.com}{Plain text}"
+    translated, _ = translate_latex(source, FakeTranslator())
+    assert "\\caption[短标题]{长标题}" in translated
+    assert "\\href{https://example.com}{普通文本}" in translated
+
+
+def test_marker_order_changes_are_rebound_to_original_protected_tokens() -> None:
+    class ReorderingTranslator:
+        def translate(self, prompt: str, *, cwd=None) -> str:
+            content = prompt.split("<latex>\n", 1)[1].rsplit("\n</latex>", 1)[0]
+            markers = __import__("re").findall(r"LATEXPROT\d{4}X", content)
+            if len(markers) >= 2:
+                content = content.replace(markers[0], "TEMP", 1).replace(markers[1], markers[0], 1).replace("TEMP", markers[1], 1)
+            return content
+
+    translated, _ = translate_latex(r"\section{Text} $x$", ReorderingTranslator())
+    assert translated == r"\section{Text} $x$"
+
+
+def test_control_word_is_separated_from_adjacent_chinese_text() -> None:
+    translated, _ = translate_latex(r"\large English", FakeTranslator())
+    assert translated.startswith(r"\large ")
+
+
+def test_inline_verbatim_and_protected_structure_are_preserved() -> None:
+    source = r"Text \verb|a_b| and \lstinline|x+y|."
+    translated, _ = translate_latex(source, FakeTranslator())
+    validate_protected_structure(source, translated)
+    assert r"\verb|a_b|" in translated
+    assert r"\lstinline|x+y|" in translated

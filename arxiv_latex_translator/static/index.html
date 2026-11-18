@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ArXiv LaTeX Translator</title>
+    <style>
+      :root { color-scheme: light; font-family: Inter, system-ui, sans-serif; }
+      body { margin: 0; min-height: 100vh; background: #f5f7fb; color: #172033; }
+      main { max-width: 780px; margin: 8vh auto; padding: 0 20px; }
+      .card { background: white; border: 1px solid #e2e7f0; border-radius: 18px; padding: 28px; box-shadow: 0 12px 36px rgba(27, 45, 80, .08); }
+      h1 { margin: 0 0 8px; font-size: 28px; }
+      p { color: #596579; line-height: 1.6; }
+      label { display: block; font-weight: 650; margin: 22px 0 8px; }
+      input { box-sizing: border-box; width: 100%; padding: 13px 14px; border: 1px solid #cbd4e2; border-radius: 10px; font-size: 16px; }
+      button { margin-top: 16px; border: 0; border-radius: 10px; padding: 12px 18px; background: #2457d6; color: white; font-size: 15px; cursor: pointer; }
+      button:disabled { opacity: .55; cursor: wait; }
+      #status { margin-top: 24px; padding: 16px; border-radius: 12px; background: #f0f4fb; min-height: 42px; }
+      progress { width: 100%; height: 12px; margin-top: 12px; }
+      a { color: #2457d6; margin-right: 14px; }
+      .error { color: #b42318; white-space: pre-wrap; }
+      .success { color: #16764a; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="card">
+        <h1>ArXiv LaTeX Translator</h1>
+        <p>输入 arXiv 链接或论文 ID。工具会保护公式、图片和表格内容，翻译正文与 caption，再编译中文 PDF。</p>
+        <form id="job-form">
+          <label for="source">arXiv 链接或 ID</label>
+          <input id="source" name="source" placeholder="例如 2401.12345 或 https://arxiv.org/abs/2401.12345" required>
+          <button id="submit" type="submit">开始翻译</button>
+        </form>
+        <div id="status" hidden>
+          <div id="message"></div>
+          <progress id="progress" max="100" value="0"></progress>
+          <div id="links" style="margin-top: 14px"></div>
+        </div>
+      </section>
+    </main>
+    <script>
+      const form = document.getElementById('job-form');
+      const button = document.getElementById('submit');
+      const statusBox = document.getElementById('status');
+      const message = document.getElementById('message');
+      const progress = document.getElementById('progress');
+      const links = document.getElementById('links');
+      let timer;
+
+      function showJob(job) {
+        statusBox.hidden = false;
+        progress.value = job.progress || 0;
+        message.className = job.status === 'failed' ? 'error' : job.status === 'completed' ? 'success' : '';
+        message.textContent = job.error ? `${job.message}\n${job.error}` : `${job.message}（${job.progress || 0}%）`;
+        if (job.status === 'completed') {
+          links.innerHTML = `<a href="${job.pdf_url}" target="_blank">打开 PDF</a><a href="${job.source_url}">下载翻译源码</a><a href="${job.log_url}" target="_blank">查看日志</a>`;
+          button.disabled = false;
+          clearInterval(timer);
+        } else if (job.status === 'failed') {
+          links.innerHTML = job.log_url ? `<a href="${job.log_url}" target="_blank">查看日志</a>` : '';
+          button.disabled = false;
+          clearInterval(timer);
+        }
+      }
+
+      async function poll(id) {
+        const response = await fetch(`/api/jobs/${id}`);
+        const job = await response.json();
+        showJob(job);
+      }
+
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        button.disabled = true;
+        links.innerHTML = '';
+        const response = await fetch('/api/jobs', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({source: document.getElementById('source').value}) });
+        const job = await response.json();
+        if (!response.ok) {
+          statusBox.hidden = false;
+          message.className = 'error';
+          message.textContent = job.error || '提交失败';
+          button.disabled = false;
+          return;
+        }
+        showJob(job);
+        timer = setInterval(() => poll(job.id), 1000);
+      });
+    </script>
+  </body>
+</html>

@@ -1,0 +1,54 @@
+import subprocess
+from pathlib import Path
+
+from arxiv_latex_translator.compiler import _ensure_cjk_support, compile_latex, compiler_command
+from arxiv_latex_translator.translator import CodexConfig, CodexCliTranslator, build_codex_command
+
+
+def test_codex_command_is_non_interactive_and_read_only() -> None:
+    command = build_codex_command(CodexConfig(model="gpt-test", profile="local"))
+    assert command[:2] == ["codex", "exec"]
+    assert "--sandbox" in command
+    assert "read-only" in command
+    assert command[-1] == "-"
+
+
+def test_codex_adapter_uses_injected_runner() -> None:
+    seen = {}
+
+    def runner(command, **kwargs):
+        seen["command"] = command
+        seen["input"] = kwargs["input"]
+        return subprocess.CompletedProcess(command, 0, '{"type":"item.completed","item":{"type":"agent_message","text":"translated"}}\n', "")
+
+    translator = CodexCliTranslator(CodexConfig(), runner=runner)
+    assert translator.translate("prompt") == "translated"
+    assert seen["input"] == "prompt"
+
+
+def test_compiler_command_disables_shell_escape(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("LATEX_COMMAND", "latexmk -xelatex")
+    command = compiler_command(tmp_path / "main.tex")
+    assert "-no-shell-escape" in command
+    assert "-f" not in command
+
+
+def test_cjk_support_is_injected_for_plain_latex(tmp_path: Path) -> None:
+    root = tmp_path / "main.tex"
+    root.write_text("\\documentclass{article}\n\\begin{document}\n中文\n\\end{document}\n", encoding="utf-8")
+    _ensure_cjk_support(root)
+    result = root.read_text(encoding="utf-8")
+    assert "\\usepackage{xeCJK}" in result
+    assert "\\setCJKmainfont{Songti SC}" in result
+
+
+def test_cjk_microtype_document_compiles(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("LATEX_COMMAND", "xelatex")
+    root = tmp_path / "main.tex"
+    root.write_text(
+        "\\documentclass{article}\n\\usepackage{microtype}\n\\begin{document}\n中文\n\\end{document}\n",
+        encoding="utf-8",
+    )
+    result = compile_latex(root, tmp_path / "artifacts")
+    assert result.returncode == 0
+    assert result.pdf_path is not None

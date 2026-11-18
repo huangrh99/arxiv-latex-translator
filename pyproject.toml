@@ -1,0 +1,11 @@
+[project]
+name = "arxiv-latex-translator"
+version = "0.1.0"
+description = "Local arXiv LaTeX translation service powered by Codex CLI"
+requires-python = ">=3.11"
+
+[project.scripts]
+arxiv-latex-translator = "arxiv_latex_translator.app:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
