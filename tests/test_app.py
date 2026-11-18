@@ -27,6 +27,10 @@ def test_health_and_invalid_job_request(tmp_path: Path) -> None:
     response = connection.getresponse()
     assert response.status == 200
     assert json.loads(response.read()) == {"status": "ok"}
+    connection.request("OPTIONS", "/api/jobs", headers={"Origin": "null", "Access-Control-Request-Method": "POST"})
+    response = connection.getresponse()
+    assert response.status == 204
+    assert response.getheader("Access-Control-Allow-Origin") == "*"
     connection.request("GET", "/api/jobs?query=2401.12345")
     response = connection.getresponse()
     payload = json.loads(response.read())

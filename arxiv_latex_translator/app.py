@@ -22,6 +22,9 @@ class TranslatorHandler(BaseHTTPRequestHandler):
     def _json(self, value: object, status: int = HTTPStatus.OK) -> None:
         payload = json.dumps(value, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
@@ -42,12 +45,21 @@ class TranslatorHandler(BaseHTTPRequestHandler):
             return
         size = path.stat().st_size
         self.send_response(HTTPStatus.OK)
+        self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Content-Type", content_type or mimetypes.guess_type(path.name)[0] or "application/octet-stream")
         self.send_header("Content-Length", str(size))
         self.end_headers()
         with path.open("rb") as stream:
             while chunk := stream.read(1024 * 1024):
                 self.wfile.write(chunk)
+
+    def do_OPTIONS(self) -> None:
+        self.send_response(HTTPStatus.NO_CONTENT)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
