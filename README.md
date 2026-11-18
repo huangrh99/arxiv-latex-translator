@@ -13,6 +13,14 @@ python3 -m arxiv_latex_translator.app
 
 项目只使用 Python 标准库。需要本机安装 `codex` 和 `latexmk`、`xelatex` 或 `tectonic`，并确保 Codex CLI 已完成登录。
 
+运行测试：
+
+```bash
+python3 -m pytest
+```
+
+本地服务默认只监听 `127.0.0.1:8000`。如果要从其他设备访问，需要显式配置反向代理或 Tailscale Serve，不要直接把 Python 服务暴露到公网。
+
 ## Mac mini 后端与 GitHub Pages 前端
 
 可以把后端和翻译结果放在 Mac mini，GitHub Pages 只托管不含论文数据的前端页面。Mac mini 上建议把任务目录放在 `papers-sync` 同步目录之外，例如：
@@ -34,7 +42,21 @@ Mac mini 没有管理员权限安装 BasicTeX 时，可以使用用户级 Homebr
 
 GitHub Pages 页面通过 `arxiv-translator/config.js` 中的 `window.ARXIV_API_BASE` 访问后端。该地址需要是浏览器可访问的 HTTPS 地址，并且后端需要允许 GitHub Pages 的跨域请求。纯 HTTP 的 Mac mini 内网地址会被 HTTPS 页面拦截，适合通过 Tailscale、Cloudflare Tunnel 或其他 HTTPS 反向代理提供访问。
 
+使用 Tailscale Serve 的示例：
+
+```bash
+tailscale serve --bg --set-path /arxiv-translator 8000
+```
+
+然后把生成的 HTTPS 地址和路径写入个人主页仓库的 `arxiv-translator/config.js`。访问页面的设备需要加入同一个 tailnet。当前 GitHub Pages 前端只保存代码，任务目录、PDF、源码归档和日志都保存在 Mac mini 的 `ARXIV_OUTPUT_DIR` 中。
+
 当前论文数据不会写入个人主页仓库。仓库根目录的 `.stignore` 也忽略 `arxiv-latex-translator/data/`，避免误把默认本地任务目录交给 Syncthing。
+
+## 数据和凭据边界
+
+GitHub private repository 只包含程序源码、静态前端和测试。Codex 登录凭据保存在运行机器的 `~/.codex/auth.json`，不会放进仓库。论文源码、翻译后的源码、PDF、日志和 `job.json` 都应该放在仓库之外的任务目录。不要把 `auth.json`、`.env`、生成的 PDF 或 `data/` 目录手动加入 Git。
+
+私有代码仓库和私有运行服务是两件事。GitHub private repository 保护源码访问，Tailscale tailnet 或其他访问控制保护 Mac mini 后端和论文内容。
 
 任务状态会记录 Codex CLI 返回的 `input_tokens`、`cached_input_tokens`、`output_tokens`、`reasoning_output_tokens` 和 `total_tokens`。其中 `total_tokens` 按输入 token 加输出 token 计算，重复调用和保护标记修复调用也会计入。
 
@@ -65,6 +87,8 @@ GitHub Pages 页面通过 `arxiv-translator/config.js` 中的 `window.ARXIV_API_
 资源保护可以通过 `ARXIV_MAX_DOWNLOAD_BYTES`、`ARXIV_MAX_ARCHIVE_BYTES`、`ARXIV_MAX_EXTRACTED_BYTES`、`ARXIV_MAX_EXTRACTED_FILES` 和 `ARXIV_MAX_CONCURRENT_JOBS` 调整。默认值分别为 200 MiB、200 MiB、512 MiB、10000 个文件和 1 个并发任务。
 
 首页的「历史翻译」列表读取已持久化任务，支持按 arXiv ID、输入链接或任务 ID搜索。接口为 `GET /api/jobs?query=关键词`。
+
+后端状态接口为 `GET /api/status`，返回最近一次 Codex CLI 调用的状态。`未验证`表示服务启动后还没有新的实际调用，`已连接`表示最近一次调用成功，`认证失效`和`调用错误`会显示最近一次失败原因。
 
 完成任务后，页面会提供中文译文 PDF、原文 arXiv PDF、翻译源码和编译日志。通过「对照阅读」可以在同一页面左右打开原文 PDF 与中文译文 PDF。原文 PDF 由 arXiv 在线提供，中文 PDF 由本服务生成并在线提供。
 
