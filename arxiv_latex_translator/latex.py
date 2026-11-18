@@ -515,8 +515,13 @@ def translate_latex(
         worker_count = min(max(1, max_parallel), len(pending)) if hasattr(translator, "new_call") else 1
         with ThreadPoolExecutor(max_workers=worker_count) as executor:
             futures = [executor.submit(translate_chunk, item) for item in pending]
+            first_error: Exception | None = None
             for future in as_completed(futures):
-                chunk_index, translated, entry, chunk_fallback, usage = future.result()
+                try:
+                    chunk_index, translated, entry, chunk_fallback, usage = future.result()
+                except Exception as exc:
+                    first_error = first_error or exc
+                    continue
                 translated_chunks[chunk_index] = translated
                 translated_characters += len(chunks[chunk_index][0])
                 fallback_count += chunk_fallback
@@ -526,4 +531,6 @@ def translate_latex(
                     chunk_cache[str(chunk_index)] = entry
                 if on_chunk_cached is not None:
                     on_chunk_cached(str(chunk_index), entry)
+            if first_error is not None:
+                raise first_error
     return _separate_control_words("".join(translated_chunks)), TranslationStats(len(chunks), translated_characters, fallback_count)
