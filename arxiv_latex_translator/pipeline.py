@@ -482,7 +482,26 @@ Compiler log:
                         continue
                     translated_files.remove(relative_name)
                 marker = self._appendix_marker(original)
-                if marker and not job.translate_appendix:
+                if relative_name == str(root.relative_to(extracted_dir)) and "\\begin{document}" in original:
+                    # The root file is mostly a preamble containing package options,
+                    # macro definitions, and the title. Translate only its document
+                    # body so those control structures cannot be corrupted by Codex.
+                    body_start = original.find("\\begin{document}")
+                    body_source = original[body_start:]
+                    body_cache = translation_cache.setdefault(f"{relative_name}::body", {})
+                    translated_body, stats = translate_latex(
+                        body_source,
+                        translator,
+                        max_chars=chunk_chars,
+                        max_parallel=chunk_parallel,
+                        cwd=job_dir,
+                        chunk_cache=body_cache,
+                        on_chunk_cached=lambda _key, _entry: self._persist_chunk_progress(job, translator, translation_cache, cache_path),
+                    )
+                    translated = original[:body_start] + translated_body
+                    validation_source = body_source
+                    validation_result = translated_body
+                elif marker and not job.translate_appendix:
                     main_source = original[: marker.end()]
                     main_cache = translation_cache.setdefault(relative_name, {})
                     translated_main, stats = translate_latex(
