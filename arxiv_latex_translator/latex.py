@@ -421,7 +421,15 @@ def _replace_markers(output: str, protected: dict[str, str]) -> str:
 
 
 def _translatable_text(text: str) -> str:
-    return "".join(token.value for token in tokenize_latex(strip_latex_comments(text)) if token.kind == "translatable")
+    text = strip_latex_comments(text)
+    if "\\begin{document}" in text:
+        text = text.split("\\begin{document}", 1)[1]
+    text = re.sub(
+        r"\\(?:title|author|date|section|subsection|subsubsection|paragraph|subparagraph)\s*(?:\[[^]]*\])?\{[^{}]*\}",
+        "",
+        text,
+    )
+    return "".join(token.value for token in tokenize_latex(text) if token.kind == "translatable")
 
 
 def looks_untranslated(original: str, translated: str) -> bool:
