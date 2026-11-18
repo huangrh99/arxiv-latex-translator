@@ -425,7 +425,7 @@ def _translatable_text(text: str) -> str:
     if "\\begin{document}" in text:
         text = text.split("\\begin{document}", 1)[1]
     text = re.sub(
-        r"\\(?:title|author|date|section|subsection|subsubsection|paragraph|subparagraph)\s*(?:\[[^]]*\])?\{[^{}]*\}",
+        r"\\(?:title|author|date|section|subsection|subsubsection|paragraph|subparagraph)\*?\s*(?:\[[^]]*\])?\{[^{}]*\}",
         "",
         text,
     )
