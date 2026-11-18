@@ -43,6 +43,7 @@ class Job:
     output_tokens: int = 0
     reasoning_output_tokens: int = 0
     total_tokens: int = 0
+    compile_failed: bool = False
     translated_files: list[str] = field(default_factory=list)
     appendix_files: list[str] = field(default_factory=list)
     translate_appendix: bool = False
@@ -231,6 +232,7 @@ class JobManager:
             job.progress = min(job.progress, 89)
             job.message = "准备复用已下载源码重试"
             job.error = None
+            job.compile_failed = False
             job.pdf_path = None
             job.source_path = None
             job.attempts += 1
@@ -244,8 +246,11 @@ class JobManager:
             job = self._jobs.get(job_id)
             if job is None:
                 raise KeyError(job_id)
-            if job.status != "failed":
-                raise RuntimeError("只有失败任务可以让 Codex 修复编译")
+            if job.status != "failed" or job.phase != "failed" or not job.compile_failed:
+                raise RuntimeError("只有编译失败任务可以让 Codex 修复编译")
+            translated_dir = self._job_dir(job.id) / "translated"
+            if not translated_dir.is_dir():
+                raise RuntimeError("翻译源码目录不存在，无法让 Codex 修复编译")
             job.status = "queued"
             job.phase = "compile"
             job.progress = 70
@@ -348,17 +353,18 @@ class JobManager:
             root = find_main_tex(translated_dir)
             self._update(job, status="running", phase="compile", progress=70, message="Codex 正在修复 LaTeX 编译")
             log_text = log_path.read_text(encoding="utf-8", errors="replace") if log_path.is_file() else ""
+            root_name = str(root.relative_to(translated_dir))
             prompt = f"""The translated LaTeX paper failed to compile.
-Inspect the current translated work tree and the compiler log below. Repair the files in this work tree
-so the main file `{root.name}` compiles. Do not touch the original source archive, the `source` directory,
-task metadata, or image assets. Preserve formulas, citations, labels, tables, figures, and paper content.
+Inspect the current translated work tree and the compiler log below. Repair files inside this work tree
+so the main file `{root_name}` compiles. Do not access or modify files outside this work tree.
+Preserve formulas, citations, labels, tables, figures, and paper content.
 Make the smallest safe edit, then return a concise summary.
 
 Compiler log:
 {log_text[-20000:]}
 """
             translator = CodexCliTranslator()
-            repair_output = translator.repair(prompt, cwd=job_dir)
+            repair_output = translator.repair(prompt, cwd=translated_dir)
             self._log(log_path, "Codex compile repair:")
             self._log(log_path, repair_output or "Codex 未返回修复摘要")
             usage = translator.total_usage
@@ -556,7 +562,7 @@ Compiler log:
                 ),
             )
 
-            self._update(job, phase="compile", progress=70, message="正在编译中文 PDF")
+            self._update(job, phase="compile", progress=70, message="正在编译中文 PDF", compile_failed=True)
             result = compile_latex(translated_root, artifact_dir)
             self._log(log_path, f"compile command: {' '.join(result.command)}")
             self._log(log_path, f"compile returncode: {result.returncode}")
@@ -583,6 +589,7 @@ Compiler log:
                 source_path=str(source_zip),
                 appendix_files=[] if job.translate_appendix else sorted(appendix_files),
                 translate_appendix=False,
+                compile_failed=False,
             )
         except Exception as exc:
             self._log(log_path, f"ERROR: {exc}")

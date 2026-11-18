@@ -472,7 +472,13 @@ def translate_latex(
         source_hash = __import__("hashlib").sha256(content.encode("utf-8")).hexdigest()
         cached = (chunk_cache or {}).get(cache_key)
         title_chunk = any(value.lstrip().startswith("\\title") for value in protected.values())
-        if not title_chunk and cached and cached.get("source_hash") == source_hash and isinstance(cached.get("translated"), str):
+        if (
+            not title_chunk
+            and cached
+            and cached.get("source_hash") == source_hash
+            and cached.get("fallback", "0") != "1"
+            and isinstance(cached.get("translated"), str)
+        ):
             translated_chunks[chunk_index] = cached["translated"]
             translated_characters += len(content)
             fallback_count += int(cached.get("fallback", "0") or 0)
@@ -502,11 +508,15 @@ def translate_latex(
                 break
             except ProtectedRegionError as exc:
                 last_error = exc
-                retry_prompt += "Return the same content again with every marker restored exactly once and in the required order."
+                retry_prompt += (
+                    "\nThe previous response failed LaTeX protection validation. "
+                    f"The exact validation error was: {exc}. "
+                    "Translate the chunk again and return every required marker exactly once "
+                    "in the original order. Do not return the previous malformed response."
+                )
         else:
             assert last_error is not None
-            translated = _replace_markers(content, protected)
-            chunk_fallback = True
+            raise ProtectedRegionError(f"Codex 连续三次返回无效 LaTeX 结构：{last_error}")
         usage = worker.total_usage if independent else None
         entry = {"source_hash": source_hash, "translated": translated, "fallback": "1" if chunk_fallback else "0"}
         return chunk_index, translated, entry, int(chunk_fallback), usage

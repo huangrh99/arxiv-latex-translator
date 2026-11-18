@@ -100,25 +100,38 @@ def test_escaped_percent_is_preserved() -> None:
     assert "comment" not in translated
 
 
-def test_marker_failure_falls_back_to_original_chunk() -> None:
+def test_marker_failure_is_reported_after_agent_retries() -> None:
     class BrokenTranslator:
         def translate(self, prompt: str, *, cwd=None) -> str:
             return "broken output"
 
-    translated, stats = translate_latex(r"\section{Text} $x$", BrokenTranslator())
-    assert translated == r"\section{Text} $x$"
-    assert stats.fallbacks == 1
+    with pytest.raises(Exception, match="连续三次"):
+        translate_latex(r"\section{Text} $x$", BrokenTranslator())
 
 
-def test_cached_fallback_count_is_preserved() -> None:
+def test_failed_chunk_is_not_cached_as_a_translation() -> None:
     class BrokenTranslator:
         def translate(self, prompt: str, *, cwd=None) -> str:
             return "broken output"
 
     cache = {}
-    translate_latex(r"\section{Text} $x$", BrokenTranslator(), chunk_cache=cache)
-    _, stats = translate_latex(r"\section{Text} $x$", BrokenTranslator(), chunk_cache=cache)
-    assert stats.fallbacks == 1
+    with pytest.raises(Exception):
+        translate_latex(r"\section{Text} $x$", BrokenTranslator(), chunk_cache=cache)
+    assert cache == {}
+
+
+def test_cached_fallback_is_retried_after_translator_recovers() -> None:
+    class RecoveringTranslator:
+        def translate(self, prompt: str, *, cwd=None) -> str:
+            content = prompt.split("<latex>\n", 1)[1].rsplit("\n</latex>", 1)[0]
+            return content.replace("Text", "译文")
+
+    source = r"\section{Text} $x$"
+    source_hash = __import__("hashlib").sha256(source.encode("utf-8")).hexdigest()
+    cache = {"0": {"source_hash": source_hash, "translated": source, "fallback": "1"}}
+    translated, stats = translate_latex(source, RecoveringTranslator(), chunk_cache=cache)
+    assert translated == r"\section{译文} $x$"
+    assert stats.fallbacks == 0
 
 
 def test_marker_retry_uses_a_new_codex_call() -> None:

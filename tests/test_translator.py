@@ -71,6 +71,15 @@ def test_cjk_support_is_injected_for_plain_latex(tmp_path: Path) -> None:
     assert "\\setCJKmainfont{Songti SC}" in result
 
 
+def test_cjk_support_is_injected_when_text_is_included(tmp_path: Path) -> None:
+    root = tmp_path / "main.tex"
+    root.write_text("\\documentclass{article}\n\\begin{document}\n\\input{body.tex}\n\\end{document}\n", encoding="utf-8")
+    (tmp_path / "body.tex").write_text("中文\n", encoding="utf-8")
+    assert _ensure_cjk_support(root) is True
+    result = root.read_text(encoding="utf-8")
+    assert "\\usepackage{xeCJK}" in result
+
+
 def test_cjk_microtype_document_compiles(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("LATEX_COMMAND", "xelatex")
     root = tmp_path / "main.tex"

@@ -47,10 +47,15 @@ def compiler_command(root: Path) -> list[str]:
     return command
 
 
-def _ensure_cjk_support(root: Path) -> None:
+def _ensure_cjk_support(root: Path) -> bool:
     text = root.read_text(encoding="utf-8", errors="replace")
-    if not re.search(r"[\u3400-\u9fff]", text):
-        return
+    source_files = [root, *sorted(path for path in root.parent.rglob("*.tex") if path != root)]
+    has_cjk = any(
+        re.search(r"[\u3400-\u9fff]", path.read_text(encoding="utf-8", errors="replace"))
+        for path in source_files
+    )
+    if not has_cjk:
+        return False
     has_ctex = bool(re.search(r"\\usepackage(?:\[[^]]*\])?\{ctex\}", text) or re.search(r"\\documentclass(?:\[[^]]*\])?\{ctex", text))
     has_xecjk = bool(re.search(r"\\usepackage(?:\[[^]]*\])?\{xeCJK\}", text))
     updated = text
@@ -70,12 +75,13 @@ def _ensure_cjk_support(root: Path) -> None:
             updated = updated[: match.end()] + "\\microtypesetup{activate=false}\n" + updated[match.end() :]
     if updated != text:
         root.write_text(updated, encoding="utf-8")
+    return True
 
 
 def compile_latex(root: Path, artifact_dir: Path) -> CompileResult:
-    _ensure_cjk_support(root)
+    has_cjk = _ensure_cjk_support(root)
     command = compiler_command(root)
-    if re.search(r"[\u3400-\u9fff]", root.read_text(encoding="utf-8", errors="replace")) and "pdflatex" in Path(command[0]).name.lower():
+    if has_cjk and "pdflatex" in Path(command[0]).name.lower():
         raise RuntimeError("包含中文内容时需要使用 XeLaTeX 或 LuaLaTeX 编译器")
     timeout = float(os.environ.get("LATEX_TIMEOUT_SECONDS", "300"))
     started = time.monotonic()
