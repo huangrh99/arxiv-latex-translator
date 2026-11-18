@@ -70,6 +70,9 @@ class TranslatorHandler(BaseHTTPRequestHandler):
         if path == "/healthz":
             self._json({"status": "ok"})
             return
+        if path == "/api/status":
+            self._json({"codex_cli": self.manager.codex_status()})
+            return
         if path == "/compare.html":
             self._send_file(STATIC_DIR / "compare.html", "text/html; charset=utf-8", STATIC_DIR)
             return

@@ -64,6 +64,11 @@ class JobManager:
         self.base_dir.mkdir(parents=True, exist_ok=True)
         self._jobs: dict[str, Job] = {}
         self._lock = threading.RLock()
+        self._codex_status = {
+            "status": "unknown",
+            "message": "等待首次 Codex CLI 调用",
+            "checked_at": None,
+        }
         self._semaphore = threading.Semaphore(int(os.environ.get("ARXIV_MAX_CONCURRENT_JOBS", "1")))
         self._load_jobs()
 
@@ -92,6 +97,40 @@ class JobManager:
                     self._persist(job)
             except (OSError, ValueError, TypeError):
                 continue
+        for job in self._jobs.values():
+            if job.error and self._is_codex_auth_error(job.error):
+                self._codex_status = {
+                    "status": "disconnected",
+                    "message": "上次 Codex CLI 调用认证失败，请重新登录",
+                    "checked_at": job.updated_at,
+                }
+                break
+
+    @staticmethod
+    def _is_codex_auth_error(message: str) -> bool:
+        lowered = message.casefold()
+        return any(
+            marker in lowered
+            for marker in (
+                "invalid_refresh_token",
+                "invalid_jwt",
+                "not logged in",
+                "sign in again",
+                "重新登录",
+            )
+        )
+
+    def _set_codex_status(self, status: str, message: str) -> None:
+        with self._lock:
+            self._codex_status = {
+                "status": status,
+                "message": message,
+                "checked_at": time.time(),
+            }
+
+    def codex_status(self) -> dict[str, Any]:
+        with self._lock:
+            return dict(self._codex_status)
 
     def _persist(self, job: Job) -> None:
         job.updated_at = time.time()
@@ -117,8 +156,29 @@ class JobManager:
         digest = hashlib.sha256(f"{identifier.value}|{config_key}".encode()).hexdigest()
         return f"{identifier.base_id.replace('/', '-')}-{digest[:10]}"
 
+    def _reusable_job(self, identifier: ArxivIdentifier) -> Job | None:
+        explicit_version = identifier.value != identifier.base_id
+        with self._lock:
+            candidates = [job for job in self._jobs.values() if job.status == "completed"]
+        candidates.sort(key=lambda job: job.updated_at, reverse=True)
+        for job in candidates:
+            if job.arxiv_id == identifier.value:
+                return job
+            if not explicit_version:
+                try:
+                    existing = parse_arxiv_input(job.arxiv_id)
+                except ValueError:
+                    continue
+                if existing.base_id == identifier.base_id:
+                    return job
+        return None
+
     def create(self, source: str, *, force: bool = False) -> Job:
         identifier = parse_arxiv_input(source)
+        if not force:
+            reusable = self._reusable_job(identifier)
+            if reusable is not None:
+                return reusable
         job_id = self._job_id(identifier)
         with self._lock:
             existing = self._jobs.get(job_id)
@@ -210,6 +270,7 @@ class JobManager:
             self._log(log_path, f"main tex: {root.relative_to(extracted_dir)}")
 
             self._update(job, phase="translate", progress=25, message="正在保护 LaTeX 结构并调用 Codex CLI")
+            self._set_codex_status("checking", "正在调用 Codex CLI")
             if translated_dir.exists():
                 shutil.rmtree(translated_dir)
             shutil.copytree(extracted_dir, translated_dir)
@@ -223,6 +284,7 @@ class JobManager:
             for index, tex_file in enumerate(tex_files, start=1):
                 original = tex_file.read_text(encoding="utf-8", errors="replace")
                 translated, stats = translate_latex(original, translator, max_chars=chunk_chars, cwd=job_dir)
+                self._set_codex_status("connected", "最近一次 Codex CLI 调用成功")
                 tex_file.write_text(translated, encoding="utf-8")
                 validate_protected_structure(original, translated)
                 total_chunks += stats.chunks
@@ -281,5 +343,10 @@ class JobManager:
             )
         except Exception as exc:
             self._log(log_path, f"ERROR: {exc}")
+            if isinstance(exc, TranslationError):
+                detail = str(exc)
+                status = "disconnected" if self._is_codex_auth_error(detail) else "error"
+                message = "Codex CLI 认证失效，请重新登录" if status == "disconnected" else detail[-500:]
+                self._set_codex_status(status, message)
             self._update(job, status="failed", phase="failed", message="任务失败", error=str(exc), log_path=str(log_path))
 

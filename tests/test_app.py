@@ -31,6 +31,11 @@ def test_health_and_invalid_job_request(tmp_path: Path) -> None:
     response = connection.getresponse()
     assert response.status == 200
     assert json.loads(response.read()) == {"status": "ok"}
+    connection.request("GET", "/api/status")
+    response = connection.getresponse()
+    status_payload = json.loads(response.read())
+    assert response.status == 200
+    assert status_payload["codex_cli"]["status"] == "unknown"
     connection.request("OPTIONS", "/api/jobs", headers={"Origin": "null", "Access-Control-Request-Method": "POST"})
     response = connection.getresponse()
     assert response.status == 204
