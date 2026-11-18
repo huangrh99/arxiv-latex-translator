@@ -88,6 +88,15 @@ Do not keep this block.
     assert r"\verb|% keep this literal|" in translated
 
 
+def test_bibliography_environment_stays_original() -> None:
+    source = r"""正文内容。
+\begin{thebibliography}{1}
+\bibitem{paper} An English bibliography entry that stays unchanged.
+\end{thebibliography}"""
+    translated, _ = translate_latex(source, FakeTranslator())
+    assert "An English bibliography entry that stays unchanged." in translated
+
+
 def test_percent_in_url_is_not_treated_as_a_comment() -> None:
     translated, _ = translate_latex(r"\url{https://example.com/a%20b} Text % comment", FakeTranslator())
     assert r"\url{https://example.com/a%20b}" in translated

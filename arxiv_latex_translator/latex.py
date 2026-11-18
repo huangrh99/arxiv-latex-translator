@@ -52,6 +52,7 @@ PROTECTED_ENVIRONMENTS = {
     "lstlisting",
     "minted",
     "comment",
+    "thebibliography",
     "tikzpicture",
 }
 
