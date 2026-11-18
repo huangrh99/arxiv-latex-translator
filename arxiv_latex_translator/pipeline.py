@@ -46,7 +46,6 @@ class Job:
     translated_files: list[str] = field(default_factory=list)
     appendix_files: list[str] = field(default_factory=list)
     translate_appendix: bool = False
-    migration_retry_used: bool = False
     config_key: str = ""
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
@@ -212,8 +211,6 @@ class JobManager:
                 return existing
             if existing and existing.status == "failed" and not force:
                 return existing
-            if existing and existing.attempts >= 3:
-                raise RuntimeError("该任务已达到三次尝试上限")
             job = Job(id=job_id, source=source, arxiv_id=identifier.value, config_key=self._config_key())
             job.attempts = (existing.attempts if existing else 0) + 1
             self._jobs[job.id] = job
@@ -229,13 +226,6 @@ class JobManager:
                 raise KeyError(job_id)
             if job.status != "failed":
                 raise RuntimeError("只有失败任务可以重试")
-            if job.attempts >= 3:
-                if not job.error or "保护结构" not in job.error or job.migration_retry_used:
-                    raise RuntimeError("该任务已达到三次尝试上限")
-                # Allow one migration retry for jobs stopped by the old
-                # marker-structure bug. The new fallback path is resumable.
-                job.attempts = 0
-                job.migration_retry_used = True
             job.status = "queued"
             job.phase = "queued"
             job.progress = min(job.progress, 89)
