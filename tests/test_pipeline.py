@@ -53,7 +53,7 @@ def test_codex_auth_failure_is_exposed_as_disconnected(tmp_path: Path) -> None:
     manager._jobs[job.id] = job
     manager._persist(job)
     reloaded = JobManager(tmp_path / "jobs")
-    assert reloaded.codex_status()["status"] == "disconnected"
+    assert reloaded.codex_status()["status"] == "unknown"
 
 
 def test_completed_translation_is_reused_for_same_arxiv_id(tmp_path: Path) -> None:

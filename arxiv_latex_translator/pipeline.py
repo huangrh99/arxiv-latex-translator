@@ -100,8 +100,8 @@ class JobManager:
         for job in self._jobs.values():
             if job.error and self._is_codex_auth_error(job.error):
                 self._codex_status = {
-                    "status": "disconnected",
-                    "message": "上次 Codex CLI 调用认证失败，请重新登录",
+                    "status": "unknown",
+                    "message": "历史任务曾出现认证错误，等待新的 Codex CLI 调用验证",
                     "checked_at": job.updated_at,
                 }
                 break
