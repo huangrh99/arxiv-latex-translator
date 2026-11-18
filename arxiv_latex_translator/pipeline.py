@@ -17,7 +17,7 @@ from typing import Any
 from .arxiv import ArxivIdentifier, download_source, extract_source, find_main_tex, parse_arxiv_input
 from .compiler import compile_latex
 from .latex import translate_latex, validate_protected_structure
-from .translator import CodexCliTranslator, TranslationError
+from .translator import CodexCliTranslator, TokenUsage, TranslationError
 
 
 @dataclass
@@ -39,6 +39,7 @@ class Job:
     output_tokens: int = 0
     reasoning_output_tokens: int = 0
     total_tokens: int = 0
+    translated_files: list[str] = field(default_factory=list)
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
 
@@ -194,7 +195,7 @@ class JobManager:
             job.attempts = (existing.attempts if existing else 0) + 1
             self._jobs[job.id] = job
             self._persist(job)
-            thread = threading.Thread(target=self._run_with_limit, args=(job,), daemon=True)
+            thread = threading.Thread(target=self._run_with_limit, args=(job, False), daemon=True)
             thread.start()
             return job
 
@@ -207,7 +208,16 @@ class JobManager:
                 raise RuntimeError("只有失败任务可以重试")
             if job.attempts >= 3:
                 raise RuntimeError("该任务已达到三次尝试上限")
-        return self.create(job.source, force=True)
+            job.status = "queued"
+            job.phase = "queued"
+            job.progress = min(job.progress, 89)
+            job.message = "准备复用已下载源码重试"
+            job.error = None
+            job.attempts += 1
+            self._persist(job)
+            thread = threading.Thread(target=self._run_with_limit, args=(job, True), daemon=True)
+            thread.start()
+            return job
 
     def get(self, job_id: str) -> Job | None:
         with self._lock:
@@ -238,11 +248,11 @@ class JobManager:
         with log_path.open("a", encoding="utf-8") as stream:
             stream.write(message.rstrip() + "\n")
 
-    def _run_with_limit(self, job: Job) -> None:
+    def _run_with_limit(self, job: Job, resume: bool = False) -> None:
         with self._semaphore:
-            self._run(job)
+            self._run(job, resume=resume)
 
-    def _run(self, job: Job) -> None:
+    def _run(self, job: Job, *, resume: bool = False) -> None:
         job_dir = self._job_dir(job.id)
         log_path = job_dir / "job.log"
         source_archive = job_dir / "source.archive"
@@ -251,42 +261,61 @@ class JobManager:
         artifact_dir = job_dir / "artifacts"
         try:
             job_dir.mkdir(parents=True, exist_ok=True)
-            for path in (source_archive, extracted_dir, translated_dir, artifact_dir):
-                if path.is_dir():
-                    shutil.rmtree(path)
-                elif path.exists():
-                    path.unlink()
-            log_path.write_text("", encoding="utf-8")
-            self._update(job, status="running", phase="download", progress=10, message="正在下载 LaTeX 源码", log_path=str(log_path))
+            can_resume = resume and source_archive.is_file() and extracted_dir.is_dir() and translated_dir.is_dir()
+            if not can_resume:
+                for path in (source_archive, extracted_dir, translated_dir, artifact_dir):
+                    if path.is_dir():
+                        shutil.rmtree(path)
+                    elif path.exists():
+                        path.unlink()
+                log_path.write_text("", encoding="utf-8")
+                self._update(job, translated_files=[], status="running", phase="download", progress=10, message="正在下载 LaTeX 源码", log_path=str(log_path))
+            else:
+                with log_path.open("a", encoding="utf-8") as stream:
+                    stream.write("\n--- retry: reusing downloaded source and completed files ---\n")
+                self._update(job, status="running", phase="translate", progress=max(job.progress, 25), message="正在复用源码并继续未完成翻译", log_path=str(log_path))
             identifier = parse_arxiv_input(job.source)
-            download_source(
-                identifier,
-                source_archive,
-                user_agent=os.environ.get("ARXIV_USER_AGENT", "arxiv-latex-translator/0.1"),
-            )
-            self._log(log_path, f"downloaded {identifier.value} to {source_archive}")
-            extract_source(source_archive, extracted_dir)
+            if not can_resume:
+                download_source(
+                    identifier,
+                    source_archive,
+                    user_agent=os.environ.get("ARXIV_USER_AGENT", "arxiv-latex-translator/0.1"),
+                )
+                self._log(log_path, f"downloaded {identifier.value} to {source_archive}")
+                extract_source(source_archive, extracted_dir)
             root = find_main_tex(extracted_dir)
             self._log(log_path, f"main tex: {root.relative_to(extracted_dir)}")
 
             self._update(job, phase="translate", progress=25, message="正在保护 LaTeX 结构并调用 Codex CLI")
             self._set_codex_status("checking", "正在调用 Codex CLI")
-            if translated_dir.exists():
+            if translated_dir.exists() and not can_resume:
                 shutil.rmtree(translated_dir)
-            shutil.copytree(extracted_dir, translated_dir)
+            if not translated_dir.exists():
+                shutil.copytree(extracted_dir, translated_dir)
             translated_root = translated_dir / root.relative_to(extracted_dir)
             translator = CodexCliTranslator()
+            translator.total_usage = TokenUsage(
+                input_tokens=job.input_tokens,
+                cached_input_tokens=job.cached_input_tokens,
+                output_tokens=job.output_tokens,
+                reasoning_output_tokens=job.reasoning_output_tokens,
+            )
             chunk_chars = int(os.environ.get("CODEX_CHUNK_CHARS", "2600"))
             tex_files = sorted(translated_dir.rglob("*.tex"))
             total = max(len(tex_files), 1)
+            translated_files = set(job.translated_files)
             total_chunks = 0
             total_characters = 0
             for index, tex_file in enumerate(tex_files, start=1):
+                relative_name = str(tex_file.relative_to(translated_dir))
+                if relative_name in translated_files:
+                    continue
                 original = tex_file.read_text(encoding="utf-8", errors="replace")
                 translated, stats = translate_latex(original, translator, max_chars=chunk_chars, cwd=job_dir)
                 self._set_codex_status("connected", "最近一次 Codex CLI 调用成功")
                 tex_file.write_text(translated, encoding="utf-8")
                 validate_protected_structure(original, translated)
+                translated_files.add(relative_name)
                 total_chunks += stats.chunks
                 total_characters += stats.characters
                 usage = translator.total_usage
@@ -297,6 +326,7 @@ class JobManager:
                     output_tokens=usage.output_tokens,
                     reasoning_output_tokens=usage.reasoning_output_tokens,
                     total_tokens=usage.total_tokens,
+                    translated_files=sorted(translated_files),
                 )
                 progress = 25 + int(index / total * 40)
                 self._update(job, progress=progress, message=f"已翻译 {index}/{total} 个 TeX 文件")
