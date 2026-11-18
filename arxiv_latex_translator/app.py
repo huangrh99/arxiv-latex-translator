@@ -30,7 +30,7 @@ class TranslatorHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
-    def _send_file(self, path: Path, content_type: str | None = None, allowed_root: Path | None = None) -> None:
+    def _send_file(self, path: Path, content_type: str | None = None, allowed_root: Path | None = None, head_only: bool = False) -> None:
         try:
             resolved = path.resolve()
             base = (allowed_root or self.manager.base_dir).resolve()
@@ -49,6 +49,8 @@ class TranslatorHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type or mimetypes.guess_type(path.name)[0] or "application/octet-stream")
         self.send_header("Content-Length", str(size))
         self.end_headers()
+        if head_only:
+            return
         with path.open("rb") as stream:
             while chunk := stream.read(1024 * 1024):
                 self.wfile.write(chunk)
@@ -58,6 +60,32 @@ class TranslatorHandler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def do_HEAD(self) -> None:
+        parsed = urlparse(self.path)
+        path = parsed.path.rstrip("/") or "/"
+        if path == "/":
+            self._send_file(STATIC_DIR / "index.html", "text/html; charset=utf-8", STATIC_DIR, head_only=True)
+            return
+        if path == "/compare.html":
+            self._send_file(STATIC_DIR / "compare.html", "text/html; charset=utf-8", STATIC_DIR, head_only=True)
+            return
+        parts = path.split("/")
+        if len(parts) == 5 and parts[1:3] == ["api", "jobs"]:
+            job = self.manager.get(parts[3])
+            if job is None:
+                self._json({"error": "任务不存在"}, HTTPStatus.NOT_FOUND)
+                return
+            files = {"pdf": (job.pdf_path, "application/pdf"), "source": (job.source_path, "application/zip"), "log": (job.log_path, "text/plain; charset=utf-8")}
+            item = files.get(parts[4])
+            if item is None or item[0] is None:
+                self._json({"error": "文件尚未生成"}, HTTPStatus.NOT_FOUND)
+                return
+            self._send_file(Path(item[0]), item[1], head_only=True)
+            return
+        self.send_response(HTTPStatus.NOT_FOUND)
         self.send_header("Content-Length", "0")
         self.end_headers()
 
