@@ -47,6 +47,8 @@ class Job:
         value.pop("pdf_path", None)
         value.pop("source_path", None)
         value.pop("log_path", None)
+        value["arxiv_url"] = f"https://arxiv.org/abs/{self.arxiv_id}"
+        value["original_pdf_url"] = f"https://arxiv.org/pdf/{self.arxiv_id}"
         if self.pdf_path:
             value["pdf_url"] = f"/api/jobs/{self.id}/pdf"
         if self.source_path:

@@ -23,6 +23,10 @@ def test_health_and_invalid_job_request(tmp_path: Path) -> None:
     response = connection.getresponse()
     assert response.status == 200
     assert b"ArXiv LaTeX Translator" in response.read()
+    connection.request("GET", "/compare.html")
+    response = connection.getresponse()
+    assert response.status == 200
+    assert b"Arxiv Translation" in response.read()
     connection.request("GET", "/healthz")
     response = connection.getresponse()
     assert response.status == 200
@@ -37,6 +41,7 @@ def test_health_and_invalid_job_request(tmp_path: Path) -> None:
     assert response.status == 200
     assert payload["count"] == 1
     assert payload["jobs"][0]["arxiv_id"] == "2401.12345"
+    assert payload["jobs"][0]["original_pdf_url"] == "https://arxiv.org/pdf/2401.12345"
     connection.request("POST", "/api/jobs", body=json.dumps({"source": "bad"}), headers={"Content-Type": "application/json"})
     response = connection.getresponse()
     assert response.status == 400

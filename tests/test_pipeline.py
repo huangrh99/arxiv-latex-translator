@@ -18,6 +18,7 @@ def test_completed_job_paths_survive_restart_without_api_leak(tmp_path: Path) ->
     assert reloaded.pdf_path == job.pdf_path
     assert "pdf_path" not in reloaded.to_dict()
     assert reloaded.to_dict()["pdf_url"] == "/api/jobs/job-1/pdf"
+    assert reloaded.to_dict()["original_pdf_url"] == "https://arxiv.org/pdf/2401.12345"
 
 
 def test_token_usage_fields_survive_restart(tmp_path: Path) -> None:
