@@ -88,6 +88,7 @@ GitHub public repository 只包含程序源码、静态前端和测试。Codex �
 | `CODEX_EXTRA_ARGS` | 空 | 额外 CLI 参数 |
 | `CODEX_TIMEOUT_SECONDS` | `600` | 单个翻译块超时 |
 | `CODEX_CHUNK_CHARS` | `2600` | 单个翻译块的最大字符数 |
+| `CODEX_REASONING_EFFORT` | `medium` | Codex CLI 的 reasoning effort |
 
 ## LaTeX 配置
 
@@ -108,6 +109,8 @@ GitHub public repository 只包含程序源码、静态前端和测试。Codex �
 完成任务后，页面会提供中文译文 PDF、原文 arXiv PDF、翻译源码和编译日志。通过「对照阅读」可以在同一页面左右打开原文 PDF 与中文译文 PDF。原文 PDF 由 arXiv 在线提供，中文 PDF 由本服务生成并在线提供。
 
 失败任务可以点击「复用源码重试」。重试会保留已下载的源码归档、解压目录和已经完成的 TeX 文件，只继续未完成的翻译并重新编译。Codex CLI 的每次翻译调用仍然是独立的 CLI 调用，不会恢复旧的 Codex 对话线程。
+
+翻译默认跳过路径或文件名包含 `appendix` 的 TeX 文件，以减少首次翻译的 token 消耗。主文完成后，页面会显示「继续翻译 Appendix」按钮，点击后只处理这些 Appendix 文件并重新编译 PDF。每个 TeX 文件的已完成片段会写入任务目录的缓存，重试时不会重复调用 Codex。
 
 ## 保护规则
 

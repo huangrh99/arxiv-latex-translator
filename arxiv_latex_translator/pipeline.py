@@ -41,6 +41,8 @@ class Job:
     reasoning_output_tokens: int = 0
     total_tokens: int = 0
     translated_files: list[str] = field(default_factory=list)
+    appendix_files: list[str] = field(default_factory=list)
+    translate_appendix: bool = False
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
 
@@ -155,6 +157,7 @@ class JobManager:
                 "CODEX_PROFILE",
                 "CODEX_EXTRA_ARGS",
                 "CODEX_CHUNK_CHARS",
+                "CODEX_REASONING_EFFORT",
                 "LATEX_COMMAND",
                 "LATEX_TIMEOUT_SECONDS",
             )
@@ -224,6 +227,26 @@ class JobManager:
             thread.start()
             return job
 
+    def translate_appendix(self, job_id: str) -> Job:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                raise KeyError(job_id)
+            if job.status != "completed":
+                raise RuntimeError("只有已完成任务可以继续翻译 Appendix")
+            if not job.appendix_files:
+                raise RuntimeError("该任务没有待翻译的 Appendix")
+            job.status = "queued"
+            job.phase = "queued"
+            job.progress = 70
+            job.message = "准备翻译 Appendix"
+            job.error = None
+            job.translate_appendix = True
+            self._persist(job)
+            thread = threading.Thread(target=self._run_with_limit, args=(job, True), daemon=True)
+            thread.start()
+            return job
+
     def get(self, job_id: str) -> Job | None:
         with self._lock:
             return self._jobs.get(job_id)
@@ -279,6 +302,11 @@ class JobManager:
         with self._semaphore:
             self._run(job, resume=resume)
 
+    @staticmethod
+    def _is_appendix_file(relative_name: str) -> bool:
+        parts = [part.casefold() for part in Path(relative_name).parts]
+        return any("appendix" in part for part in parts)
+
     def _run(self, job: Job, *, resume: bool = False) -> None:
         job_dir = self._job_dir(job.id)
         log_path = job_dir / "job.log"
@@ -286,6 +314,7 @@ class JobManager:
         extracted_dir = job_dir / "source"
         translated_dir = job_dir / "translated"
         artifact_dir = job_dir / "artifacts"
+        cache_path = job_dir / "translation-cache.json"
         try:
             job_dir.mkdir(parents=True, exist_ok=True)
             can_resume = resume and source_archive.is_file() and extracted_dir.is_dir() and translated_dir.is_dir()
@@ -331,14 +360,40 @@ class JobManager:
             tex_files = sorted(translated_dir.rglob("*.tex"))
             total = max(len(tex_files), 1)
             translated_files = set(job.translated_files)
+            appendix_files = set(job.appendix_files)
+            translation_cache: dict[str, dict[str, dict[str, str]]] = {}
+            if can_resume and cache_path.is_file():
+                try:
+                    loaded_cache = json.loads(cache_path.read_text(encoding="utf-8"))
+                    if isinstance(loaded_cache, dict):
+                        translation_cache = loaded_cache
+                except (OSError, ValueError):
+                    translation_cache = {}
+
+            def persist_translation_cache() -> None:
+                temp = cache_path.with_suffix(".tmp")
+                temp.write_text(json.dumps(translation_cache, ensure_ascii=False), encoding="utf-8")
+                temp.replace(cache_path)
+
             total_chunks = 0
             total_characters = 0
             for index, tex_file in enumerate(tex_files, start=1):
                 relative_name = str(tex_file.relative_to(translated_dir))
+                if self._is_appendix_file(relative_name) and not job.translate_appendix:
+                    appendix_files.add(relative_name)
+                    continue
                 if relative_name in translated_files:
                     continue
                 original = tex_file.read_text(encoding="utf-8", errors="replace")
-                translated, stats = translate_latex(original, translator, max_chars=chunk_chars, cwd=job_dir)
+                file_cache = translation_cache.setdefault(relative_name, {})
+                translated, stats = translate_latex(
+                    original,
+                    translator,
+                    max_chars=chunk_chars,
+                    cwd=job_dir,
+                    chunk_cache=file_cache,
+                    on_chunk_cached=lambda _key, _entry: persist_translation_cache(),
+                )
                 self._set_codex_status("connected", "最近一次 Codex CLI 调用成功")
                 tex_file.write_text(translated, encoding="utf-8")
                 validate_protected_structure(original, translated)
@@ -354,6 +409,7 @@ class JobManager:
                     reasoning_output_tokens=usage.reasoning_output_tokens,
                     total_tokens=usage.total_tokens,
                     translated_files=sorted(translated_files),
+                    appendix_files=sorted(appendix_files),
                 )
                 progress = 25 + int(index / total * 40)
                 self._update(job, progress=progress, message=f"已翻译 {index}/{total} 个 TeX 文件")
@@ -397,6 +453,8 @@ class JobManager:
                 message="翻译和编译已完成",
                 pdf_path=str(result.pdf_path),
                 source_path=str(source_zip),
+                appendix_files=[] if job.translate_appendix else sorted(appendix_files),
+                translate_appendix=False,
             )
         except Exception as exc:
             self._log(log_path, f"ERROR: {exc}")

@@ -62,6 +62,12 @@ def test_control_word_is_separated_from_adjacent_chinese_text() -> None:
     assert translated.startswith(r"\large ")
 
 
+def test_emph_command_is_not_split_by_cjk_spacing() -> None:
+    translated, _ = translate_latex(r"\emph{English} 中文", FakeTranslator())
+    assert r"\emph{English}" in translated
+    assert r"\em ph" not in translated
+
+
 def test_inline_verbatim_and_protected_structure_are_preserved() -> None:
     source = r"Text \verb|a_b| and \lstinline|x+y|."
     translated, _ = translate_latex(source, FakeTranslator())

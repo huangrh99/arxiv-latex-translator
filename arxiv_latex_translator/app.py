@@ -138,6 +138,17 @@ class TranslatorHandler(BaseHTTPRequestHandler):
             return
 
         parts = path.split("/")
+        if len(parts) == 5 and parts[1:3] == ["api", "jobs"] and parts[4] == "appendix":
+            try:
+                job = self.manager.translate_appendix(parts[3])
+            except KeyError:
+                self._json({"error": "任务不存在"}, HTTPStatus.NOT_FOUND)
+                return
+            except RuntimeError as exc:
+                self._json({"error": str(exc)}, HTTPStatus.CONFLICT)
+                return
+            self._json(job.to_dict(), HTTPStatus.ACCEPTED)
+            return
         if len(parts) == 5 and parts[1:3] == ["api", "jobs"] and parts[4] == "retry":
             try:
                 job = self.manager.retry(parts[3])

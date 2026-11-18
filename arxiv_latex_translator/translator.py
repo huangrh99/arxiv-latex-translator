@@ -43,6 +43,7 @@ class CodexConfig:
     workdir: Path | None = None
     extra_args: tuple[str, ...] = ()
     timeout_seconds: float = 600.0
+    reasoning_effort: str = "medium"
 
     @classmethod
     def from_env(cls) -> "CodexConfig":
@@ -61,10 +62,11 @@ class CodexConfig:
             workdir=Path(workdir_value).expanduser() if workdir_value else None,
             extra_args=extra,
             timeout_seconds=timeout,
+            reasoning_effort=os.environ.get("CODEX_REASONING_EFFORT", "medium"),
         )
 
     def cache_key(self) -> str:
-        return "|".join((self.executable, self.model or "", self.profile or "", *self.extra_args))
+        return "|".join((self.executable, self.model or "", self.profile or "", self.reasoning_effort, *self.extra_args))
 
 
 def build_codex_command(config: CodexConfig) -> list[str]:
@@ -78,6 +80,8 @@ def build_codex_command(config: CodexConfig) -> list[str]:
         "--color",
         "never",
         "--json",
+        "-c",
+        f'model_reasoning_effort="{config.reasoning_effort}"',
     ]
     if config.model:
         command.extend(["--model", config.model])

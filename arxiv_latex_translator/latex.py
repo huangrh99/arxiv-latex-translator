@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Callable, Protocol
 
 
 class ChunkTranslator(Protocol):
@@ -356,7 +356,7 @@ def _separate_control_words(text: str) -> str:
     """Keep TeX control words from consuming adjacent CJK text."""
 
     text = re.sub(r"(\\[A-Za-z@]+)(?=[\u3400-\u9fff])", r"\1 ", text)
-    text = re.sub(r"\\(?:newblock|item|large|small|normalsize|bfseries|itshape|em|rmfamily|sffamily|ttfamily|centering|raggedright)(?=[A-Za-z])", lambda match: match.group(0) + " ", text)
+    text = re.sub(r"\\(?:newblock|item|large|small|normalsize|bfseries|itshape|em|rmfamily|sffamily|ttfamily|centering|raggedright)(?![A-Za-z@])(?=[A-Za-z])", lambda match: match.group(0) + " ", text)
     tokens = tokenize_latex(text)
     separated: list[str] = []
     for index, token in enumerate(tokens):
@@ -382,15 +382,31 @@ def translate_latex(
     *,
     max_chars: int = 2600,
     cwd=None,
+    chunk_cache: dict[str, dict[str, str]] | None = None,
+    on_chunk_cached: Callable[[str, dict[str, str]], None] | None = None,
 ) -> tuple[str, TranslationStats]:
     tokens = tokenize_latex(text)
     chunks = _make_chunks(tokens, max_chars)
     translated_chunks: list[str] = []
     translated_characters = 0
-    for content, protected, _ in chunks:
+    for chunk_index, (content, protected, _) in enumerate(chunks):
+        cache_key = str(chunk_index)
+        source_hash = __import__("hashlib").sha256(content.encode("utf-8")).hexdigest()
+        cached = (chunk_cache or {}).get(cache_key)
+        if cached and cached.get("source_hash") == source_hash and isinstance(cached.get("translated"), str):
+            translated_chunks.append(cached["translated"])
+            translated_characters += len(content)
+            continue
         translatable_content = re.sub(r"LATEXPROT\d{4}X", "", content)
         if not translatable_content.strip():
-            translated_chunks.append(_replace_markers(content, protected))
+            translated = _replace_markers(content, protected)
+            translated_chunks.append(translated)
+            translated_characters += len(content)
+            entry = {"source_hash": source_hash, "translated": translated}
+            if chunk_cache is not None:
+                chunk_cache[cache_key] = entry
+            if on_chunk_cached is not None:
+                on_chunk_cached(cache_key, entry)
             continue
         prompt = TRANSLATION_PROMPT.format(content=content)
         translated = ""
@@ -410,4 +426,9 @@ def translate_latex(
             raise last_error
         translated_chunks.append(translated)
         translated_characters += len(content)
+        entry = {"source_hash": source_hash, "translated": translated}
+        if chunk_cache is not None:
+            chunk_cache[cache_key] = entry
+        if on_chunk_cached is not None:
+            on_chunk_cached(cache_key, entry)
     return _separate_control_words("".join(translated_chunks)), TranslationStats(len(chunks), translated_characters)

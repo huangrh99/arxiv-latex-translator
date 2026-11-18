@@ -10,6 +10,7 @@ def test_codex_command_is_non_interactive_and_read_only() -> None:
     assert command[:2] == ["codex", "exec"]
     assert "--sandbox" in command
     assert "read-only" in command
+    assert "model_reasoning_effort=\"medium\"" in command
     assert command[-1] == "-"
 
 
