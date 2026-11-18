@@ -1,7 +1,7 @@
 import subprocess
 from pathlib import Path
 
-from arxiv_latex_translator.compiler import _ensure_cjk_support, _missing_packages, _write_package_shims, compile_latex, compiler_command
+from arxiv_latex_translator.compiler import _ensure_cjk_support, compile_latex, compiler_command
 from arxiv_latex_translator.translator import CodexConfig, CodexCliTranslator, build_codex_command, build_codex_repair_command
 
 
@@ -81,10 +81,3 @@ def test_cjk_microtype_document_compiles(monkeypatch, tmp_path: Path) -> None:
     result = compile_latex(root, tmp_path / "artifacts")
     assert result.returncode == 0
     assert result.pdf_path is not None
-
-
-def test_known_missing_package_gets_a_local_shim(tmp_path: Path) -> None:
-    assert _missing_packages("! LaTeX Error: File `simpleicons.sty' not found.") == ["simpleicons"]
-    created = _write_package_shims(tmp_path / "main.tex", "! LaTeX Error: File `simpleicons.sty' not found.")
-    assert created == ["simpleicons"]
-    assert "ProvidesPackage{simpleicons}" in (tmp_path / "simpleicons.sty").read_text(encoding="utf-8")

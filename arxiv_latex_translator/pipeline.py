@@ -239,6 +239,25 @@ class JobManager:
             thread.start()
             return job
 
+    def repair_compile(self, job_id: str) -> Job:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                raise KeyError(job_id)
+            if job.status != "failed":
+                raise RuntimeError("只有失败任务可以让 Codex 修复编译")
+            job.status = "queued"
+            job.phase = "compile"
+            job.progress = 70
+            job.message = "等待 Codex 修复 LaTeX 编译"
+            job.error = None
+            job.pdf_path = None
+            job.source_path = None
+            self._persist(job)
+            thread = threading.Thread(target=self._run_compile_repair_with_limit, args=(job,), daemon=True)
+            thread.start()
+            return job
+
     def translate_appendix(self, job_id: str) -> Job:
         with self._lock:
             job = self._jobs.get(job_id)
@@ -316,6 +335,45 @@ class JobManager:
     def _run_with_limit(self, job: Job, resume: bool = False) -> None:
         with self._semaphore:
             self._run(job, resume=resume)
+
+    def _run_compile_repair_with_limit(self, job: Job) -> None:
+        with self._semaphore:
+            self._run_compile_repair(job)
+
+    def _run_compile_repair(self, job: Job) -> None:
+        job_dir = self._job_dir(job.id)
+        log_path = job_dir / "job.log"
+        translated_dir = job_dir / "translated"
+        try:
+            root = find_main_tex(translated_dir)
+            self._update(job, status="running", phase="compile", progress=70, message="Codex 正在修复 LaTeX 编译")
+            log_text = log_path.read_text(encoding="utf-8", errors="replace") if log_path.is_file() else ""
+            prompt = f"""The translated LaTeX paper failed to compile.
+Inspect the current translated work tree and the compiler log below. Repair the files in this work tree
+so the main file `{root.name}` compiles. Do not touch the original source archive, the `source` directory,
+task metadata, or image assets. Preserve formulas, citations, labels, tables, figures, and paper content.
+Make the smallest safe edit, then return a concise summary.
+
+Compiler log:
+{log_text[-20000:]}
+"""
+            translator = CodexCliTranslator()
+            repair_output = translator.repair(prompt, cwd=job_dir)
+            self._log(log_path, "Codex compile repair:")
+            self._log(log_path, repair_output or "Codex 未返回修复摘要")
+            usage = translator.total_usage
+            self._update(
+                job,
+                input_tokens=job.input_tokens + usage.input_tokens,
+                cached_input_tokens=job.cached_input_tokens + usage.cached_input_tokens,
+                output_tokens=job.output_tokens + usage.output_tokens,
+                reasoning_output_tokens=job.reasoning_output_tokens + usage.reasoning_output_tokens,
+                total_tokens=job.total_tokens + usage.total_tokens,
+            )
+            self._run(job, resume=True)
+        except Exception as exc:
+            self._log(log_path, f"ERROR: Codex compile repair failed: {exc}")
+            self._update(job, status="failed", phase="failed", message="任务失败", error=str(exc), log_path=str(log_path))
 
     @staticmethod
     def _is_appendix_file(relative_name: str) -> bool:
@@ -504,36 +562,6 @@ class JobManager:
             self._log(log_path, f"compile returncode: {result.returncode}")
             self._log(log_path, result.stdout)
             self._log(log_path, result.stderr)
-            if (result.returncode != 0 or result.pdf_path is None) and os.environ.get("CODEX_COMPILE_REPAIR", "1") != "0":
-                repair_prompt = f"""The LaTeX compilation for the translated paper failed.
-Read the compiler error below and repair only the translated LaTeX work tree in the current directory.
-The main file is {translated_root.name}. Do not touch the source archive, original source directory,
-PDF assets, or task metadata. Preserve formulas, citations, labels, tables, figures, and document content.
-After editing, return a short summary of the repair. Do not merely describe a fix.
-
-Compiler output:
-{(result.stderr or result.stdout)[-16000:]}
-"""
-                try:
-                    self._set_codex_status("checking", "正在让 Codex CLI 修复 LaTeX 编译错误")
-                    repair_output = translator.repair(repair_prompt, cwd=job_dir)
-                    self._log(log_path, "Codex compile repair:")
-                    self._log(log_path, repair_output or "Codex 未返回修复摘要")
-                    usage = translator.total_usage
-                    self._update(
-                        job,
-                        input_tokens=usage.input_tokens,
-                        cached_input_tokens=usage.cached_input_tokens,
-                        output_tokens=usage.output_tokens,
-                        reasoning_output_tokens=usage.reasoning_output_tokens,
-                        total_tokens=usage.total_tokens,
-                    )
-                    result = compile_latex(translated_root, artifact_dir)
-                    self._log(log_path, f"repair compile returncode: {result.returncode}")
-                    self._log(log_path, result.stdout)
-                    self._log(log_path, result.stderr)
-                except TranslationError as repair_error:
-                    self._log(log_path, f"Codex compile repair failed: {repair_error}")
             if result.returncode != 0 or result.pdf_path is None:
                 raise RuntimeError("LaTeX 编译失败，请查看编译日志")
 
