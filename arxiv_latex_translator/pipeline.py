@@ -17,8 +17,11 @@ from typing import Any
 
 from .arxiv import ArxivIdentifier, download_source, extract_source, find_main_tex, parse_arxiv_input
 from .compiler import compile_latex
-from .latex import ProtectedRegionError, strip_latex_comments, translate_latex, validate_protected_structure
+from .latex import ProtectedRegionError, strip_latex_comments, tokenize_latex, translate_latex, validate_protected_structure
 from .translator import CodexCliTranslator, TokenUsage, TranslationError
+
+
+TRANSLATION_CACHE_VERSION = "latex-protection-v3"
 
 
 @dataclass
@@ -240,6 +243,8 @@ class JobManager:
             job.progress = min(job.progress, 89)
             job.message = "准备复用已下载源码重试"
             job.error = None
+            job.pdf_path = None
+            job.source_path = None
             job.attempts += 1
             self._persist(job)
             thread = threading.Thread(target=self._run_with_limit, args=(job, True), daemon=True)
@@ -260,6 +265,8 @@ class JobManager:
             job.progress = 70
             job.message = "准备翻译 Appendix"
             job.error = None
+            job.pdf_path = None
+            job.source_path = None
             job.translate_appendix = True
             self._persist(job)
             thread = threading.Thread(target=self._run_with_limit, args=(job, True), daemon=True)
@@ -328,7 +335,13 @@ class JobManager:
 
     @staticmethod
     def _appendix_marker(text: str) -> re.Match[str] | None:
-        return re.search(r"(?m)^\s*\\appendix\b", text)
+        masked: list[str] = []
+        for token in tokenize_latex(text):
+            value = token.value
+            if token.kind == "protected" and re.match(r"\\begin\{(?:verbatim|verbatim\*|lstlisting|minted|comment)\}", value):
+                value = re.sub(r"[^\n]", " ", value)
+            masked.append(value)
+        return re.search(r"(?m)^\s*\\appendix\b", "".join(masked))
 
     def _run(self, job: Job, *, resume: bool = False) -> None:
         job_dir = self._job_dir(job.id)
@@ -396,7 +409,8 @@ class JobManager:
             if can_resume and cache_path.is_file():
                 try:
                     loaded_cache = json.loads(cache_path.read_text(encoding="utf-8"))
-                    if isinstance(loaded_cache, dict):
+                    if isinstance(loaded_cache, dict) and loaded_cache.get("_version") == TRANSLATION_CACHE_VERSION:
+                        loaded_cache.pop("_version", None)
                         translation_cache = loaded_cache
                 except (OSError, ValueError):
                     translation_cache = {}
@@ -540,7 +554,8 @@ class JobManager:
         cache_path: Path,
     ) -> None:
         temp = cache_path.with_suffix(".tmp")
-        temp.write_text(json.dumps(translation_cache, ensure_ascii=False), encoding="utf-8")
+        payload = {"_version": TRANSLATION_CACHE_VERSION, **translation_cache}
+        temp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         temp.replace(cache_path)
         usage = translator.total_usage
         self._update(

@@ -474,13 +474,14 @@ def translate_latex(
         if not title_chunk and cached and cached.get("source_hash") == source_hash and isinstance(cached.get("translated"), str):
             translated_chunks.append(cached["translated"])
             translated_characters += len(content)
+            fallback_count += int(cached.get("fallback", "0") or 0)
             continue
         translatable_content = re.sub(r"LATEXPROT\d{4}X", "", content)
         if not translatable_content.strip():
             translated = _replace_markers(content, protected)
             translated_chunks.append(translated)
             translated_characters += len(content)
-            entry = {"source_hash": source_hash, "translated": translated}
+            entry = {"source_hash": source_hash, "translated": translated, "fallback": "0"}
             if chunk_cache is not None:
                 chunk_cache[cache_key] = entry
             if on_chunk_cached is not None:
@@ -489,6 +490,7 @@ def translate_latex(
         prompt = TRANSLATION_PROMPT.format(content=content)
         translated = ""
         last_error: ProtectedRegionError | None = None
+        chunk_fallback = False
         marker_order = ", ".join(protected)
         retry_prompt = prompt + f"\nThe required marker sequence is exactly: {marker_order}\n"
         for _ in range(3):
@@ -520,9 +522,10 @@ def translate_latex(
             # untranslated chunk is recorded in the aggregate statistics.
             translated = _replace_markers(content, protected)
             fallback_count += 1
+            chunk_fallback = True
         translated_chunks.append(translated)
         translated_characters += len(content)
-        entry = {"source_hash": source_hash, "translated": translated}
+        entry = {"source_hash": source_hash, "translated": translated, "fallback": "1" if chunk_fallback else "0"}
         if chunk_cache is not None:
             chunk_cache[cache_key] = entry
         if on_chunk_cached is not None:
