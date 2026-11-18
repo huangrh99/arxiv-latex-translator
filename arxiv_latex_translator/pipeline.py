@@ -406,7 +406,8 @@ class JobManager:
             total_fallbacks = 0
             for index, tex_file in enumerate(tex_files, start=1):
                 relative_name = str(tex_file.relative_to(translated_dir))
-                if self._is_appendix_file(relative_name) and not job.translate_appendix:
+                appendix_file = self._is_appendix_file(relative_name)
+                if appendix_file and not job.translate_appendix:
                     appendix_files.add(relative_name)
                     continue
                 if relative_name in translated_files:
@@ -427,7 +428,7 @@ class JobManager:
                     )
                     translated = translated_main + original[marker.end() :]
                     appendix_files.add(relative_name)
-                elif marker and job.translate_appendix:
+                elif marker and job.translate_appendix and not appendix_file:
                     working = tex_file.read_text(encoding="utf-8", errors="replace")
                     appendix_cache = translation_cache.setdefault(f"{relative_name}::appendix", {})
                     translated_appendix, stats = translate_latex(
