@@ -30,8 +30,13 @@ def compiler_command(root: Path) -> list[str]:
         command = ["latexmk", "-xelatex"]
     elif shutil.which("xelatex"):
         command = ["xelatex"]
+    elif shutil.which("tectonic"):
+        command = ["tectonic"]
     else:
-        raise RuntimeError("没有找到 latexmk 或 xelatex，请安装 LaTeX 工具链")
+        raise RuntimeError("没有找到 latexmk、xelatex 或 tectonic，请安装 LaTeX 工具链")
+    if Path(command[0]).name == "tectonic":
+        command.extend(["--keep-logs", root.name])
+        return command
     if "-no-shell-escape" not in command:
         command.append("-no-shell-escape")
     command.extend(["-interaction=nonstopmode", "-halt-on-error", "-file-line-error"])

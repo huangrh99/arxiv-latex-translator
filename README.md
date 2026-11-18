@@ -11,7 +11,7 @@ python3 -m arxiv_latex_translator.app
 
 浏览器打开 <http://127.0.0.1:8000>。
 
-项目只使用 Python 标准库。需要本机安装 `codex` 和 `latexmk` 或 `xelatex`，并确保 Codex CLI 已完成登录。
+项目只使用 Python 标准库。需要本机安装 `codex` 和 `latexmk`、`xelatex` 或 `tectonic`，并确保 Codex CLI 已完成登录。
 
 ## Mac mini 后端与 GitHub Pages 前端
 
@@ -23,6 +23,14 @@ ARXIV_PORT=8000 \
 ARXIV_OUTPUT_DIR="$HOME/arxiv-latex-translator-data/jobs" \
 python3 -m arxiv_latex_translator.app
 ```
+
+Mac mini 没有管理员权限安装 BasicTeX 时，可以使用用户级 Homebrew 安装 `tectonic`：
+
+```bash
+/opt/homebrew/bin/brew install tectonic
+```
+
+编译器会在找不到 `latexmk` 和 `xelatex` 时自动回退到 Tectonic。
 
 GitHub Pages 页面通过 `arxiv-translator/config.js` 中的 `window.ARXIV_API_BASE` 访问后端。该地址需要是浏览器可访问的 HTTPS 地址，并且后端需要允许 GitHub Pages 的跨域请求。纯 HTTP 的 Mac mini 内网地址会被 HTTPS 页面拦截，适合通过 Tailscale、Cloudflare Tunnel 或其他 HTTPS 反向代理提供访问。
 
@@ -46,7 +54,7 @@ GitHub Pages 页面通过 `arxiv-translator/config.js` 中的 `window.ARXIV_API_
 
 ## LaTeX 配置
 
-默认优先使用 `latexmk -xelatex`，没有 `latexmk` 时使用 `xelatex`。可以用 `LATEX_COMMAND` 指定完整命令，例如 `LATEX_COMMAND='latexmk -xelatex'`。编译超时由 `LATEX_TIMEOUT_SECONDS` 控制。
+默认优先使用 `latexmk -xelatex`，其次使用 `xelatex`，最后使用 `tectonic`。可以用 `LATEX_COMMAND` 指定完整命令，例如 `LATEX_COMMAND='latexmk -xelatex'`。编译超时由 `LATEX_TIMEOUT_SECONDS` 控制。
 
 检测到中文内容时，编译器会为没有 CJK 支持的文档注入 `xeCJK` 和 macOS 的 `Songti SC` 字体设置，并关闭 `microtype` 的自动字形探测，避免中文字体触发 XeTeX 错误。使用自定义编译命令时，需要确保该命令支持 XeLaTeX 和 CJK 字体。
 

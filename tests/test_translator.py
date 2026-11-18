@@ -43,6 +43,16 @@ def test_compiler_command_disables_shell_escape(monkeypatch, tmp_path: Path) -> 
     assert "-f" not in command
 
 
+def test_compiler_command_uses_tectonic_fallback(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.delenv("LATEX_COMMAND", raising=False)
+    monkeypatch.setattr(
+        "arxiv_latex_translator.compiler.shutil.which",
+        lambda name: "/opt/homebrew/bin/tectonic" if name == "tectonic" else None,
+    )
+    command = compiler_command(tmp_path / "main.tex")
+    assert command == ["tectonic", "--keep-logs", "main.tex"]
+
+
 def test_cjk_support_is_injected_for_plain_latex(tmp_path: Path) -> None:
     root = tmp_path / "main.tex"
     root.write_text("\\documentclass{article}\n\\begin{document}\n中文\n\\end{document}\n", encoding="utf-8")
