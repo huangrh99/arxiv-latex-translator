@@ -282,14 +282,15 @@ class JobManager:
         with self._lock:
             jobs = list(self._jobs.values())
         if needle:
-            jobs = [
-                job
-                for job in jobs
-                if needle in parse_arxiv_input(job.arxiv_id).base_id.casefold()
-                or needle in job.arxiv_id.casefold()
-                or needle in job.source.casefold()
-                or needle in job.id.casefold()
-            ]
+            filtered: list[Job] = []
+            for job in jobs:
+                try:
+                    base_id = parse_arxiv_input(job.arxiv_id).base_id.casefold()
+                except ValueError:
+                    base_id = ""
+                if needle in base_id or needle in job.arxiv_id.casefold() or needle in job.source.casefold() or needle in job.id.casefold():
+                    filtered.append(job)
+            jobs = filtered
         grouped: dict[str, Job] = {}
         for job in jobs:
             try:

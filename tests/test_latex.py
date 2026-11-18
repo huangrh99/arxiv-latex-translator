@@ -108,6 +108,17 @@ def test_marker_failure_falls_back_to_original_chunk() -> None:
     assert stats.fallbacks == 1
 
 
+def test_cached_fallback_count_is_preserved() -> None:
+    class BrokenTranslator:
+        def translate(self, prompt: str, *, cwd=None) -> str:
+            return "broken output"
+
+    cache = {}
+    translate_latex(r"\section{Text} $x$", BrokenTranslator(), chunk_cache=cache)
+    _, stats = translate_latex(r"\section{Text} $x$", BrokenTranslator(), chunk_cache=cache)
+    assert stats.fallbacks == 1
+
+
 def test_marker_retry_resumes_the_codex_thread() -> None:
     commands = []
 
