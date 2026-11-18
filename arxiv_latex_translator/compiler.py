@@ -12,6 +12,13 @@ from pathlib import Path
 import re
 
 
+KNOWN_PACKAGE_SHIMS = {
+    "simpleicons": r"""\ProvidesPackage{simpleicons}[2026/11/19 local compatibility shim]
+\newcommand{\simpleicon}[1]{}
+""",
+}
+
+
 @dataclass(frozen=True)
 class CompileResult:
     command: tuple[str, ...]
@@ -72,6 +79,23 @@ def _ensure_cjk_support(root: Path) -> None:
         root.write_text(updated, encoding="utf-8")
 
 
+def _missing_packages(stderr: str) -> list[str]:
+    return sorted(set(re.findall(r"File [`']([A-Za-z0-9_-]+)\.sty['`] not found", stderr)))
+
+
+def _write_package_shims(root: Path, stderr: str) -> list[str]:
+    created: list[str] = []
+    for package in _missing_packages(stderr):
+        content = KNOWN_PACKAGE_SHIMS.get(package)
+        if content is None:
+            continue
+        shim = root.parent / f"{package}.sty"
+        if not shim.exists():
+            shim.write_text(content, encoding="utf-8")
+            created.append(package)
+    return created
+
+
 def compile_latex(root: Path, artifact_dir: Path) -> CompileResult:
     _ensure_cjk_support(root)
     command = compiler_command(root)
@@ -79,23 +103,36 @@ def compile_latex(root: Path, artifact_dir: Path) -> CompileResult:
         raise RuntimeError("包含中文内容时需要使用 XeLaTeX 或 LuaLaTeX 编译器")
     timeout = float(os.environ.get("LATEX_TIMEOUT_SECONDS", "300"))
     started = time.monotonic()
-    try:
-        completed = subprocess.run(
-            command,
-            cwd=str(root.parent),
-            text=True,
-            capture_output=True,
-            timeout=timeout,
-            check=False,
-        )
-        returncode = completed.returncode
-        stdout = completed.stdout or ""
-        stderr = completed.stderr or ""
-    except subprocess.TimeoutExpired as exc:
-        returncode = 124
-        stdout = (exc.stdout or b"").decode(errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
-        timeout_stderr = (exc.stderr or b"").decode(errors="replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
-        stderr = timeout_stderr + f"\nLaTeX 编译超时（{timeout:.0f} 秒）"
+    stdout_parts: list[str] = []
+    stderr_parts: list[str] = []
+    returncode = 1
+    for attempt in range(2):
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=str(root.parent),
+                text=True,
+                capture_output=True,
+                timeout=timeout,
+                check=False,
+            )
+            returncode = completed.returncode
+            stdout = completed.stdout or ""
+            stderr = completed.stderr or ""
+        except subprocess.TimeoutExpired as exc:
+            returncode = 124
+            stdout = (exc.stdout or b"").decode(errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+            timeout_stderr = (exc.stderr or b"").decode(errors="replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+            stderr = timeout_stderr + f"\nLaTeX 编译超时（{timeout:.0f} 秒）"
+        stdout_parts.append(stdout)
+        stderr_parts.append(stderr)
+        if returncode == 0:
+            break
+        if attempt == 0 and _write_package_shims(root, stderr):
+            continue
+        break
+    stdout = "\n".join(stdout_parts)
+    stderr = "\n".join(stderr_parts)
     duration = time.monotonic() - started
     produced_pdf = root.with_suffix(".pdf")
     pdf_path: Path | None = None

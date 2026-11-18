@@ -95,6 +95,8 @@ GitHub public repository 只包含程序源码、静态前端和测试。Codex �
 
 默认优先使用 `latexmk -xelatex`，其次使用 `xelatex`，最后使用 `tectonic`。可以用 `LATEX_COMMAND` 指定完整命令，例如 `LATEX_COMMAND='latexmk -xelatex'`。编译超时由 `LATEX_TIMEOUT_SECONDS` 控制。
 
+编译日志发现已知缺失包时，系统会先生成本地兼容 shim 并自动重试。仍然失败时默认调用一次 Codex CLI，在当前翻译工作目录内修复 LaTeX 后再次编译。可设置 `CODEX_COMPILE_REPAIR=0` 关闭这次自动修复。Codex 修复不会修改原始源码归档、图片资源或任务元数据。
+
 检测到中文内容时，编译器会为没有 CJK 支持的文档注入 `xeCJK` 和 macOS 的 `Songti SC` 字体设置，并关闭 `microtype` 的自动字形探测，避免中文字体触发 XeTeX 错误。使用自定义编译命令时，需要确保该命令支持 XeLaTeX 和 CJK 字体。
 
 ## 输出

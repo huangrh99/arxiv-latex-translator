@@ -504,6 +504,36 @@ class JobManager:
             self._log(log_path, f"compile returncode: {result.returncode}")
             self._log(log_path, result.stdout)
             self._log(log_path, result.stderr)
+            if (result.returncode != 0 or result.pdf_path is None) and os.environ.get("CODEX_COMPILE_REPAIR", "1") != "0":
+                repair_prompt = f"""The LaTeX compilation for the translated paper failed.
+Read the compiler error below and repair only the translated LaTeX work tree in the current directory.
+The main file is {translated_root.name}. Do not touch the source archive, original source directory,
+PDF assets, or task metadata. Preserve formulas, citations, labels, tables, figures, and document content.
+After editing, return a short summary of the repair. Do not merely describe a fix.
+
+Compiler output:
+{(result.stderr or result.stdout)[-16000:]}
+"""
+                try:
+                    self._set_codex_status("checking", "正在让 Codex CLI 修复 LaTeX 编译错误")
+                    repair_output = translator.repair(repair_prompt, cwd=job_dir)
+                    self._log(log_path, "Codex compile repair:")
+                    self._log(log_path, repair_output or "Codex 未返回修复摘要")
+                    usage = translator.total_usage
+                    self._update(
+                        job,
+                        input_tokens=usage.input_tokens,
+                        cached_input_tokens=usage.cached_input_tokens,
+                        output_tokens=usage.output_tokens,
+                        reasoning_output_tokens=usage.reasoning_output_tokens,
+                        total_tokens=usage.total_tokens,
+                    )
+                    result = compile_latex(translated_root, artifact_dir)
+                    self._log(log_path, f"repair compile returncode: {result.returncode}")
+                    self._log(log_path, result.stdout)
+                    self._log(log_path, result.stderr)
+                except TranslationError as repair_error:
+                    self._log(log_path, f"Codex compile repair failed: {repair_error}")
             if result.returncode != 0 or result.pdf_path is None:
                 raise RuntimeError("LaTeX 编译失败，请查看编译日志")
 

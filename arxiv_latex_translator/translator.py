@@ -91,6 +91,29 @@ def build_codex_command(config: CodexConfig) -> list[str]:
     return command
 
 
+def build_codex_repair_command(config: CodexConfig) -> list[str]:
+    command = [
+        config.executable,
+        "exec",
+        "--skip-git-repo-check",
+        "--sandbox",
+        "workspace-write",
+        "--ephemeral",
+        "--color",
+        "never",
+        "--json",
+        "-c",
+        f'model_reasoning_effort="{config.reasoning_effort}"',
+    ]
+    if config.model:
+        command.extend(["--model", config.model])
+    if config.profile:
+        command.extend(["--profile", config.profile])
+    command.extend(config.extra_args)
+    command.append("-")
+    return command
+
+
 def _clean_output(output: str) -> str:
     value = output.strip()
     if value.startswith("```") and value.endswith("```"):
@@ -181,3 +204,10 @@ class CodexCliTranslator:
         """Create an independent translator for a parallel chunk call."""
 
         return CodexCliTranslator(self.config, runner=self.runner)
+
+    def repair(self, prompt: str, *, cwd: Path | None = None) -> str:
+        output_text = self._run(build_codex_repair_command(self.config), prompt, cwd=cwd)
+        output, usage = _extract_json_result(output_text)
+        self.last_usage = usage
+        self.total_usage = self.total_usage.add(usage)
+        return output or _clean_output(output_text)
