@@ -132,10 +132,22 @@ def test_failed_chunk_is_not_cached_as_a_translation() -> None:
 def test_untranslated_english_chunk_is_retried() -> None:
     class EchoTranslator:
         def translate(self, prompt: str, *, cwd=None) -> str:
-            return prompt.split("<latex>\n", 1)[1].rsplit("\n</latex>", 1)[0]
+            if "<latex>\n" in prompt:
+                return prompt.split("<latex>\n", 1)[1].rsplit("\n</latex>", 1)[0]
+            return prompt.split("<text>\n", 1)[1].rsplit("\n</text>", 1)[0]
 
     with pytest.raises(Exception, match="英文段落"):
         translate_latex("This is a sufficiently long English paragraph that must be translated.", EchoTranslator())
+
+
+def test_plain_text_recovery_translates_a_chunk_after_marker_retries() -> None:
+    class MarkerEchoTranslator:
+        def translate(self, prompt: str, *, cwd=None) -> str:
+            content = prompt.split("<latex>\n", 1)[1].rsplit("\n</latex>", 1)[0] if "<latex>" in prompt else prompt.split("<text>\n", 1)[1].rsplit("\n</text>", 1)[0]
+            return content if "<latex>" in prompt else content.replace("English paragraph", "中文段落")
+
+    translated, _ = translate_latex("This is a sufficiently long English paragraph that must be translated. $x$", MarkerEchoTranslator())
+    assert "中文段落" in translated
 
 
 def test_untranslated_detector_ignores_short_technical_text() -> None:
