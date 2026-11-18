@@ -55,7 +55,7 @@ Mac mini 没有管理员权限安装 BasicTeX 时，可以使用用户级 Homebr
 
 编译器会在找不到 `latexmk` 和 `xelatex` 时自动回退到 Tectonic。
 
-GitHub Pages 页面通过 `arxiv-translator/config.js` 中的 `window.ARXIV_API_BASE` 访问后端。该地址需要是浏览器可访问的 HTTPS 地址，并且后端需要允许 GitHub Pages 的跨域请求。纯 HTTP 的 Mac mini 内网地址会被 HTTPS 页面拦截，适合通过 Tailscale、Cloudflare Tunnel 或其他 HTTPS 反向代理提供访问。
+后端自己提供的页面会根据当前 HTTPS 地址自动填充 API 地址。GitHub Pages 仓库中的 `arxiv-translator/config.js` 保持空值，不把后端地址写入公开源码。需要从 GitHub Pages 访问后端时，可在页面的「后端连接设置」中填写地址，地址只保存到当前浏览器。该地址需要是浏览器可访问的 HTTPS 地址，并且后端需要允许 GitHub Pages 的跨域请求。纯 HTTP 的 Mac mini 内网地址会被 HTTPS 页面拦截，适合通过 Tailscale、Cloudflare Tunnel 或其他 HTTPS 反向代理提供访问。
 
 使用 Tailscale Serve 的示例：
 
