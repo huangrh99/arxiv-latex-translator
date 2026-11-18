@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Callable, Protocol
-
-from .translator import TranslationError
-
 
 class ChunkTranslator(Protocol):
     def translate(self, prompt: str, *, cwd=None) -> str:
@@ -456,6 +454,7 @@ def translate_latex(
     translator: ChunkTranslator,
     *,
     max_chars: int = 2600,
+    max_parallel: int = 3,
     cwd=None,
     chunk_cache: dict[str, dict[str, str]] | None = None,
     on_chunk_cached: Callable[[str, dict[str, str]], None] | None = None,
@@ -463,30 +462,33 @@ def translate_latex(
     text = strip_latex_comments(text)
     tokens = tokenize_latex(text)
     chunks = _make_chunks(tokens, max_chars)
-    translated_chunks: list[str] = []
+    translated_chunks = [""] * len(chunks)
     translated_characters = 0
     fallback_count = 0
+    pending: list[tuple[int, str, dict[str, str], str]] = []
+
     for chunk_index, (content, protected, _) in enumerate(chunks):
         cache_key = str(chunk_index)
         source_hash = __import__("hashlib").sha256(content.encode("utf-8")).hexdigest()
         cached = (chunk_cache or {}).get(cache_key)
         title_chunk = any(value.lstrip().startswith("\\title") for value in protected.values())
         if not title_chunk and cached and cached.get("source_hash") == source_hash and isinstance(cached.get("translated"), str):
-            translated_chunks.append(cached["translated"])
+            translated_chunks[chunk_index] = cached["translated"]
             translated_characters += len(content)
             fallback_count += int(cached.get("fallback", "0") or 0)
             continue
+        pending.append((chunk_index, content, protected, source_hash))
+
+    def translate_chunk(item: tuple[int, str, dict[str, str], str]):
+        chunk_index, content, protected, source_hash = item
+        cache_key = str(chunk_index)
+        independent = hasattr(translator, "new_call")
+        worker = translator.new_call() if independent else translator
         translatable_content = re.sub(r"LATEXPROT\d{4}X", "", content)
         if not translatable_content.strip():
             translated = _replace_markers(content, protected)
-            translated_chunks.append(translated)
-            translated_characters += len(content)
-            entry = {"source_hash": source_hash, "translated": translated, "fallback": "0"}
-            if chunk_cache is not None:
-                chunk_cache[cache_key] = entry
-            if on_chunk_cached is not None:
-                on_chunk_cached(cache_key, entry)
-            continue
+            return chunk_index, translated, {"source_hash": source_hash, "translated": translated, "fallback": "0"}, 0, None
+
         prompt = TRANSLATION_PROMPT.format(content=content)
         translated = ""
         last_error: ProtectedRegionError | None = None
@@ -495,21 +497,7 @@ def translate_latex(
         retry_prompt = prompt + f"\nThe required marker sequence is exactly: {marker_order}\n"
         for _ in range(3):
             try:
-                use_resume = (
-                    hasattr(translator, "resume")
-                    and getattr(translator, "last_session_id", None)
-                    and (last_error is not None or getattr(translator, "resume_next", False))
-                )
-                if use_resume:
-                    try:
-                        translated = translator.resume(retry_prompt, cwd=cwd)
-                    except TranslationError:
-                        # A persisted thread may have expired. Start a fresh
-                        # turn and keep the source/cache fallback path alive.
-                        translated = translator.translate(retry_prompt, cwd=cwd)
-                    translator.resume_next = False
-                else:
-                    translated = translator.translate(retry_prompt, cwd=cwd)
+                translated = worker.translate(retry_prompt, cwd=cwd)
                 translated = _replace_markers(translated, protected)
                 break
             except ProtectedRegionError as exc:
@@ -517,17 +505,25 @@ def translate_latex(
                 retry_prompt += "Return the same content again with every marker restored exactly once and in the required order."
         else:
             assert last_error is not None
-            # Preserve a compilable LaTeX chunk when the model repeatedly
-            # violates the marker contract. The task continues and the
-            # untranslated chunk is recorded in the aggregate statistics.
             translated = _replace_markers(content, protected)
-            fallback_count += 1
             chunk_fallback = True
-        translated_chunks.append(translated)
-        translated_characters += len(content)
+        usage = worker.total_usage if independent else None
         entry = {"source_hash": source_hash, "translated": translated, "fallback": "1" if chunk_fallback else "0"}
-        if chunk_cache is not None:
-            chunk_cache[cache_key] = entry
-        if on_chunk_cached is not None:
-            on_chunk_cached(cache_key, entry)
+        return chunk_index, translated, entry, int(chunk_fallback), usage
+
+    if pending:
+        worker_count = min(max(1, max_parallel), len(pending)) if hasattr(translator, "new_call") else 1
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            futures = [executor.submit(translate_chunk, item) for item in pending]
+            for future in as_completed(futures):
+                chunk_index, translated, entry, chunk_fallback, usage = future.result()
+                translated_chunks[chunk_index] = translated
+                translated_characters += len(chunks[chunk_index][0])
+                fallback_count += chunk_fallback
+                if usage is not None:
+                    translator.total_usage = translator.total_usage.add(usage)
+                if chunk_cache is not None:
+                    chunk_cache[str(chunk_index)] = entry
+                if on_chunk_cached is not None:
+                    on_chunk_cached(str(chunk_index), entry)
     return _separate_control_words("".join(translated_chunks)), TranslationStats(len(chunks), translated_characters, fallback_count)

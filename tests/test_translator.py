@@ -2,7 +2,7 @@ import subprocess
 from pathlib import Path
 
 from arxiv_latex_translator.compiler import _ensure_cjk_support, compile_latex, compiler_command
-from arxiv_latex_translator.translator import CodexConfig, CodexCliTranslator, build_codex_command, build_codex_resume_command
+from arxiv_latex_translator.translator import CodexConfig, CodexCliTranslator, build_codex_command
 
 
 def test_codex_command_is_non_interactive_and_read_only() -> None:
@@ -12,14 +12,6 @@ def test_codex_command_is_non_interactive_and_read_only() -> None:
     assert "read-only" in command
     assert "model_reasoning_effort=\"medium\"" in command
     assert command[-1] == "-"
-
-
-def test_codex_resume_command_keeps_read_only_policy() -> None:
-    command = build_codex_resume_command(CodexConfig(model="gpt-test", profile="local"), "thread-1")
-    assert command[:3] == ["codex", "exec", "resume"]
-    assert 'sandbox_mode="read-only"' in command
-    assert "--model" in command and "gpt-test" in command
-    assert "--profile" in command and "local" in command
 
 
 def test_codex_adapter_uses_injected_runner() -> None:

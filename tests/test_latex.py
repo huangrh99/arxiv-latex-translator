@@ -2,6 +2,8 @@ import pytest
 import subprocess
 import re
 import json
+import threading
+import time
 
 from arxiv_latex_translator.latex import tokenize_latex, translate_latex, validate_protected_structure
 from arxiv_latex_translator.translator import CodexCliTranslator, CodexConfig
@@ -119,13 +121,13 @@ def test_cached_fallback_count_is_preserved() -> None:
     assert stats.fallbacks == 1
 
 
-def test_marker_retry_resumes_the_codex_thread() -> None:
+def test_marker_retry_uses_a_new_codex_call() -> None:
     commands = []
 
     def runner(command, **kwargs):
         commands.append(command)
         if len(commands) == 1:
-            output = '{"type":"thread.started","thread_id":"thread-1"}\n{"type":"item.completed","item":{"type":"agent_message","text":"broken"}}\n'
+            output = '{"type":"item.completed","item":{"type":"agent_message","text":"broken"}}\n'
         else:
             prompt = kwargs["input"]
             content = prompt.split("<latex>\n", 1)[1].rsplit("\n</latex>", 1)[0]
@@ -135,8 +137,33 @@ def test_marker_retry_resumes_the_codex_thread() -> None:
     translator = CodexCliTranslator(CodexConfig(), runner=runner)
     translated, _ = translate_latex(r"Text $x$", translator)
     assert translated == r"Text $x$"
-    assert commands[1][2] == "resume"
-    assert "thread-1" in commands[1]
+    assert commands[0][1] == "exec"
+    assert commands[1][1] == "exec"
+
+
+def test_codex_chunks_can_run_in_parallel() -> None:
+    class ParallelTranslator:
+        def __init__(self, tracker):
+            self.tracker = tracker
+            self.total_usage = type("Usage", (), {"add": lambda self, other: self})()
+
+        def new_call(self):
+            return ParallelTranslator(self.tracker)
+
+        def translate(self, prompt: str, *, cwd=None) -> str:
+            content = prompt.split("<latex>\n", 1)[1].rsplit("\n</latex>", 1)[0]
+            with self.tracker["lock"]:
+                self.tracker["active"] += 1
+                self.tracker["max_active"] = max(self.tracker["max_active"], self.tracker["active"])
+            time.sleep(0.03)
+            with self.tracker["lock"]:
+                self.tracker["active"] -= 1
+            return content
+
+    tracker = {"lock": threading.Lock(), "active": 0, "max_active": 0}
+    source = " ".join(f"sentence-{index}" for index in range(40))
+    translate_latex(source, ParallelTranslator(tracker), max_chars=30, max_parallel=3)
+    assert tracker["max_active"] >= 2
 
 
 def test_inline_verbatim_and_protected_structure_are_preserved() -> None:

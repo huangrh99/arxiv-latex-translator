@@ -41,12 +41,6 @@ def test_token_usage_fields_survive_restart(tmp_path: Path) -> None:
     assert reloaded.cached_input_tokens == 20
 
 
-def test_codex_session_id_stays_internal(tmp_path: Path) -> None:
-    manager = JobManager(tmp_path / "jobs")
-    job = Job(id="job-session", source="2401.12345", arxiv_id="2401.12345", codex_session_id="thread-secret")
-    assert "codex_session_id" not in job.to_dict()
-
-
 def test_codex_auth_failure_is_exposed_as_disconnected(tmp_path: Path) -> None:
     manager = JobManager(tmp_path / "jobs")
     job = Job(

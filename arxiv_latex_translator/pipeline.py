@@ -46,7 +46,6 @@ class Job:
     translated_files: list[str] = field(default_factory=list)
     appendix_files: list[str] = field(default_factory=list)
     translate_appendix: bool = False
-    codex_session_id: str | None = None
     migration_retry_used: bool = False
     config_key: str = ""
     created_at: float = field(default_factory=time.time)
@@ -57,7 +56,6 @@ class Job:
         value.pop("pdf_path", None)
         value.pop("source_path", None)
         value.pop("log_path", None)
-        value.pop("codex_session_id", None)
         value["arxiv_url"] = f"https://arxiv.org/abs/{self.arxiv_id}"
         value["original_pdf_url"] = f"https://arxiv.org/pdf/{self.arxiv_id}"
         try:
@@ -388,13 +386,7 @@ class JobManager:
                 shutil.copytree(extracted_dir, translated_dir)
             self._strip_comments_in_tree(translated_dir)
             translated_root = translated_dir / root.relative_to(extracted_dir)
-            def remember_session(session_id: str) -> None:
-                self._update(job, codex_session_id=session_id)
-
-            translator = CodexCliTranslator(on_session_started=remember_session)
-            if resume and job.codex_session_id:
-                translator.last_session_id = job.codex_session_id
-                translator.resume_next = True
+            translator = CodexCliTranslator()
             translator.total_usage = TokenUsage(
                 input_tokens=job.input_tokens,
                 cached_input_tokens=job.cached_input_tokens,
@@ -402,6 +394,9 @@ class JobManager:
                 reasoning_output_tokens=job.reasoning_output_tokens,
             )
             chunk_chars = int(os.environ.get("CODEX_CHUNK_CHARS", "2600"))
+            chunk_parallel = int(os.environ.get("CODEX_MAX_PARALLEL_CHUNKS", "3"))
+            if chunk_parallel <= 0:
+                raise ValueError("CODEX_MAX_PARALLEL_CHUNKS 必须大于 0")
             tex_files = sorted(translated_dir.rglob("*.tex"))
             total = max(len(tex_files), 1)
             translated_files = set(job.translated_files)
@@ -437,6 +432,7 @@ class JobManager:
                         main_source,
                         translator,
                         max_chars=chunk_chars,
+                        max_parallel=chunk_parallel,
                         cwd=job_dir,
                         chunk_cache=main_cache,
                         on_chunk_cached=lambda _key, _entry: self._persist_chunk_progress(job, translator, translation_cache, cache_path),
@@ -450,6 +446,7 @@ class JobManager:
                         original[marker.end() :],
                         translator,
                         max_chars=chunk_chars,
+                        max_parallel=chunk_parallel,
                         cwd=job_dir,
                         chunk_cache=appendix_cache,
                         on_chunk_cached=lambda _key, _entry: self._persist_chunk_progress(job, translator, translation_cache, cache_path),
@@ -461,6 +458,7 @@ class JobManager:
                         original,
                         translator,
                         max_chars=chunk_chars,
+                        max_parallel=chunk_parallel,
                         cwd=job_dir,
                         chunk_cache=file_cache,
                         on_chunk_cached=lambda _key, _entry: self._persist_chunk_progress(job, translator, translation_cache, cache_path),
@@ -561,7 +559,6 @@ class JobManager:
         usage = translator.total_usage
         self._update(
             job,
-            codex_session_id=translator.last_session_id,
             input_tokens=usage.input_tokens,
             cached_input_tokens=usage.cached_input_tokens,
             output_tokens=usage.output_tokens,

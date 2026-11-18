@@ -91,27 +91,6 @@ def build_codex_command(config: CodexConfig) -> list[str]:
     return command
 
 
-def build_codex_resume_command(config: CodexConfig, session_id: str) -> list[str]:
-    command = [
-        config.executable,
-        "exec",
-        "resume",
-        "--skip-git-repo-check",
-        "--json",
-        "-c",
-        'sandbox_mode="read-only"',
-        "-c",
-        f'model_reasoning_effort="{config.reasoning_effort}"',
-    ]
-    if config.model:
-        command.extend(["--model", config.model])
-    if config.profile:
-        command.extend(["--profile", config.profile])
-    command.extend(config.extra_args)
-    command.extend([session_id, "-"])
-    return command
-
-
 def _clean_output(output: str) -> str:
     value = output.strip()
     if value.startswith("```") and value.endswith("```"):
@@ -158,28 +137,12 @@ class CodexCliTranslator:
         config: CodexConfig | None = None,
         *,
         runner: Callable[..., subprocess.CompletedProcess[str]] | None = None,
-        on_session_started: Callable[[str], None] | None = None,
     ) -> None:
         self.config = config or CodexConfig.from_env()
         self.runner = runner or subprocess.run
         self.last_stderr = ""
         self.last_usage = TokenUsage()
         self.total_usage = TokenUsage()
-        self.last_session_id: str | None = None
-        self.resume_next = False
-        self.on_session_started = on_session_started
-
-    def _capture_session_id(self, output: str) -> None:
-        for line in output.splitlines():
-            try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if event.get("type") == "thread.started" and isinstance(event.get("thread_id"), str):
-                self.last_session_id = event["thread_id"]
-                if self.on_session_started is not None:
-                    self.on_session_started(self.last_session_id)
-                break
 
     def _run(self, command: list[str], prompt: str, *, cwd: Path | None) -> str:
         run_cwd = cwd or self.config.workdir
@@ -194,15 +157,10 @@ class CodexCliTranslator:
                 check=False,
             )
         except subprocess.TimeoutExpired as exc:
-            partial = exc.stdout or b""
-            if isinstance(partial, bytes):
-                partial = partial.decode(errors="replace")
-            self._capture_session_id(partial)
             raise TranslationError(f"Codex CLI 超时（{self.config.timeout_seconds:.0f} 秒）") from exc
         except OSError as exc:
             raise TranslationError(f"无法启动 Codex CLI：{exc}") from exc
         self.last_stderr = result.stderr or ""
-        self._capture_session_id(result.stdout or "")
         if result.returncode != 0:
             detail = (result.stderr or result.stdout or "未知错误").strip()
             raise TranslationError(f"Codex CLI 返回码 {result.returncode}：{detail[-2000:]}")
@@ -219,14 +177,7 @@ class CodexCliTranslator:
             raise TranslationError("Codex CLI 返回了空翻译结果")
         return output
 
-    def resume(self, prompt: str, *, cwd: Path | None = None) -> str:
-        if not self.last_session_id:
-            return self.translate(prompt, cwd=cwd)
-        output_text = self._run(build_codex_resume_command(self.config, self.last_session_id), prompt, cwd=cwd)
-        output, usage = _extract_json_result(output_text)
-        self.last_usage = usage
-        self.total_usage = self.total_usage.add(usage)
-        output = output or _clean_output(output_text)
-        if not output:
-            raise TranslationError("Codex CLI 恢复会话返回了空翻译结果")
-        return output
+    def new_call(self) -> "CodexCliTranslator":
+        """Create an independent translator for a parallel chunk call."""
+
+        return CodexCliTranslator(self.config, runner=self.runner)
