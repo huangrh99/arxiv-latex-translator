@@ -17,7 +17,7 @@ from typing import Any
 
 from .arxiv import ArxivIdentifier, download_source, extract_source, find_main_tex, parse_arxiv_input
 from .compiler import compile_latex
-from .latex import translate_latex, validate_protected_structure
+from .latex import ProtectedRegionError, translate_latex, validate_protected_structure
 from .translator import CodexCliTranslator, TokenUsage, TranslationError
 
 
@@ -434,8 +434,16 @@ class JobManager:
                         on_chunk_cached=lambda _key, _entry: self._persist_chunk_progress(job, translator, translation_cache, cache_path),
                     )
                 self._set_codex_status("connected", "最近一次 Codex CLI 调用成功")
+                try:
+                    validate_protected_structure(original, translated)
+                except ProtectedRegionError as exc:
+                    self._log(log_path, f"protected-structure fallback: {relative_name}: {exc}")
+                    translated = original
+                    translation_cache.pop(relative_name, None)
+                    translation_cache.pop(f"{relative_name}::appendix", None)
+                    self._persist_chunk_progress(job, translator, translation_cache, cache_path)
+                    stats = type(stats)(stats.chunks, stats.characters, stats.fallbacks + 1)
                 tex_file.write_text(translated, encoding="utf-8")
-                validate_protected_structure(original, translated)
                 if not marker or job.translate_appendix:
                     translated_files.add(relative_name)
                 total_chunks += stats.chunks
