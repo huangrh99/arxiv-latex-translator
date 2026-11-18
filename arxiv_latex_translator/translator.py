@@ -16,6 +16,26 @@ class TranslationError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class TokenUsage:
+    input_tokens: int = 0
+    cached_input_tokens: int = 0
+    output_tokens: int = 0
+    reasoning_output_tokens: int = 0
+
+    @property
+    def total_tokens(self) -> int:
+        return self.input_tokens + self.output_tokens
+
+    def add(self, other: "TokenUsage") -> "TokenUsage":
+        return TokenUsage(
+            input_tokens=self.input_tokens + other.input_tokens,
+            cached_input_tokens=self.cached_input_tokens + other.cached_input_tokens,
+            output_tokens=self.output_tokens + other.output_tokens,
+            reasoning_output_tokens=self.reasoning_output_tokens + other.reasoning_output_tokens,
+        )
+
+
+@dataclass(frozen=True)
 class CodexConfig:
     executable: str = "codex"
     model: str | None = None
@@ -78,18 +98,32 @@ def _clean_output(output: str) -> str:
 
 
 def _extract_json_message(output: str) -> str | None:
+    message, _ = _extract_json_result(output)
+    return message
+
+
+def _extract_json_result(output: str) -> tuple[str | None, TokenUsage]:
     messages: list[str] = []
+    usage = TokenUsage()
     for line in output.splitlines():
         try:
             event = json.loads(line)
         except json.JSONDecodeError:
             continue
         if event.get("type") != "item.completed":
+            if event.get("type") == "turn.completed":
+                raw_usage = event.get("usage") or {}
+                usage = TokenUsage(
+                    input_tokens=int(raw_usage.get("input_tokens", 0) or 0),
+                    cached_input_tokens=int(raw_usage.get("cached_input_tokens", 0) or 0),
+                    output_tokens=int(raw_usage.get("output_tokens", 0) or 0),
+                    reasoning_output_tokens=int(raw_usage.get("reasoning_output_tokens", 0) or 0),
+                )
             continue
         item = event.get("item") or {}
         if item.get("type") == "agent_message" and isinstance(item.get("text"), str):
             messages.append(item["text"])
-    return messages[-1] if messages else None
+    return (messages[-1] if messages else None), usage
 
 
 class CodexCliTranslator:
@@ -104,6 +138,8 @@ class CodexCliTranslator:
         self.config = config or CodexConfig.from_env()
         self.runner = runner or subprocess.run
         self.last_stderr = ""
+        self.last_usage = TokenUsage()
+        self.total_usage = TokenUsage()
 
     def translate(self, prompt: str, *, cwd: Path | None = None) -> str:
         command = build_codex_command(self.config)
@@ -126,7 +162,10 @@ class CodexCliTranslator:
         if result.returncode != 0:
             detail = (result.stderr or result.stdout or "未知错误").strip()
             raise TranslationError(f"Codex CLI 返回码 {result.returncode}：{detail[-2000:]}")
-        output = _extract_json_message(result.stdout or "") or _clean_output(result.stdout or "")
+        output, usage = _extract_json_result(result.stdout or "")
+        self.last_usage = usage
+        self.total_usage = self.total_usage.add(usage)
+        output = output or _clean_output(result.stdout or "")
         if not output:
             raise TranslationError("Codex CLI 返回了空翻译结果")
         return output

@@ -19,11 +19,21 @@ def test_codex_adapter_uses_injected_runner() -> None:
     def runner(command, **kwargs):
         seen["command"] = command
         seen["input"] = kwargs["input"]
-        return subprocess.CompletedProcess(command, 0, '{"type":"item.completed","item":{"type":"agent_message","text":"translated"}}\n', "")
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            '{"type":"item.completed","item":{"type":"agent_message","text":"translated"}}\n'
+            '{"type":"turn.completed","usage":{"input_tokens":12,"cached_input_tokens":4,"output_tokens":7,"reasoning_output_tokens":2}}\n',
+            "",
+        )
 
     translator = CodexCliTranslator(CodexConfig(), runner=runner)
     assert translator.translate("prompt") == "translated"
     assert seen["input"] == "prompt"
+    assert translator.last_usage.input_tokens == 12
+    assert translator.last_usage.cached_input_tokens == 4
+    assert translator.last_usage.output_tokens == 7
+    assert translator.total_usage.total_tokens == 19
 
 
 def test_compiler_command_disables_shell_escape(monkeypatch, tmp_path: Path) -> None:

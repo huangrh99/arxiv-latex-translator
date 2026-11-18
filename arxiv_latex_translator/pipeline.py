@@ -34,6 +34,11 @@ class Job:
     source_path: str | None = None
     log_path: str | None = None
     attempts: int = 0
+    input_tokens: int = 0
+    cached_input_tokens: int = 0
+    output_tokens: int = 0
+    reasoning_output_tokens: int = 0
+    total_tokens: int = 0
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
 
@@ -205,9 +210,31 @@ class JobManager:
                 validate_protected_structure(original, translated)
                 total_chunks += stats.chunks
                 total_characters += stats.characters
+                usage = translator.total_usage
+                self._update(
+                    job,
+                    input_tokens=usage.input_tokens,
+                    cached_input_tokens=usage.cached_input_tokens,
+                    output_tokens=usage.output_tokens,
+                    reasoning_output_tokens=usage.reasoning_output_tokens,
+                    total_tokens=usage.total_tokens,
+                )
                 progress = 25 + int(index / total * 40)
                 self._update(job, progress=progress, message=f"已翻译 {index}/{total} 个 TeX 文件")
-            self._log(log_path, f"translated files={len(tex_files)} chunks={total_chunks} characters={total_characters}")
+            usage = translator.total_usage
+            self._log(
+                log_path,
+                "translated files={} chunks={} characters={} input_tokens={} cached_input_tokens={} output_tokens={} reasoning_output_tokens={} total_tokens={}".format(
+                    len(tex_files),
+                    total_chunks,
+                    total_characters,
+                    usage.input_tokens,
+                    usage.cached_input_tokens,
+                    usage.output_tokens,
+                    usage.reasoning_output_tokens,
+                    usage.total_tokens,
+                ),
+            )
 
             self._update(job, phase="compile", progress=70, message="正在编译中文 PDF")
             result = compile_latex(translated_root, artifact_dir)

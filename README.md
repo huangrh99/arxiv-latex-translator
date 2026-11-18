@@ -13,6 +13,8 @@ python3 -m arxiv_latex_translator.app
 
 项目只使用 Python 标准库。需要本机安装 `codex` 和 `latexmk` 或 `xelatex`，并确保 Codex CLI 已完成登录。
 
+任务状态会记录 Codex CLI 返回的 `input_tokens`、`cached_input_tokens`、`output_tokens`、`reasoning_output_tokens` 和 `total_tokens`。其中 `total_tokens` 按输入 token 加输出 token 计算，重复调用和保护标记修复调用也会计入。
+
 ## Codex CLI 配置
 
 默认适配器执行 `codex exec --skip-git-repo-check --sandbox read-only --ephemeral --color never -`。可用环境变量配置：
