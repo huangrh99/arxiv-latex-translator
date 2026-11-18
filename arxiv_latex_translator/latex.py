@@ -432,13 +432,15 @@ def _translatable_text(text: str) -> str:
     return "".join(token.value for token in tokenize_latex(text) if token.kind == "translatable")
 
 
-def looks_untranslated(original: str, translated: str) -> bool:
+def looks_untranslated(original: str, translated: str, *, require_no_cjk: bool = False) -> bool:
     """Detect an agent response that preserves a substantial English prose span."""
 
     original_text = _translatable_text(original)
     translated_text = _translatable_text(translated)
     original_words = re.findall(r"[A-Za-z][A-Za-z'-]*", original_text)
     if len(original_words) < 8:
+        return False
+    if require_no_cjk and re.search(r"[\u3400-\u9fff]", translated_text):
         return False
     if original_text.strip() == translated_text.strip():
         return True
@@ -509,10 +511,11 @@ def translate_latex(
             and cached.get("fallback", "0") != "1"
             and isinstance(cached.get("translated"), str)
         ):
-            translated_chunks[chunk_index] = cached["translated"]
-            translated_characters += len(content)
-            fallback_count += int(cached.get("fallback", "0") or 0)
-            continue
+            if not looks_untranslated(content, cached["translated"], require_no_cjk=True):
+                translated_chunks[chunk_index] = cached["translated"]
+                translated_characters += len(content)
+                fallback_count += int(cached.get("fallback", "0") or 0)
+                continue
         pending.append((chunk_index, content, protected, source_hash))
 
     def translate_chunk(item: tuple[int, str, dict[str, str], str]):
@@ -535,7 +538,7 @@ def translate_latex(
             try:
                 translated = worker.translate(retry_prompt, cwd=cwd)
                 translated = _replace_markers(translated, protected)
-                if looks_untranslated(translatable_content, re.sub(r"LATEXPROT\d{4}X", "", translated)):
+                if looks_untranslated(translatable_content, re.sub(r"LATEXPROT\d{4}X", "", translated), require_no_cjk=True):
                     raise ProtectedRegionError("翻译结果保留了与原文高度相似的英文段落，疑似未翻译")
                 break
             except ProtectedRegionError as exc:
