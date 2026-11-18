@@ -92,17 +92,24 @@ def build_codex_command(config: CodexConfig) -> list[str]:
 
 
 def build_codex_resume_command(config: CodexConfig, session_id: str) -> list[str]:
-    return [
+    command = [
         config.executable,
         "exec",
         "resume",
         "--skip-git-repo-check",
         "--json",
         "-c",
+        'sandbox_mode="read-only"',
+        "-c",
         f'model_reasoning_effort="{config.reasoning_effort}"',
-        session_id,
-        "-",
     ]
+    if config.model:
+        command.extend(["--model", config.model])
+    if config.profile:
+        command.extend(["--profile", config.profile])
+    command.extend(config.extra_args)
+    command.extend([session_id, "-"])
+    return command
 
 
 def _clean_output(output: str) -> str:

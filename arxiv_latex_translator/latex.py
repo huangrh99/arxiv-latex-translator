@@ -74,6 +74,10 @@ MATH_ENVIRONMENTS = {
 
 FULL_COMMANDS = {
     "title",
+    "author",
+    "date",
+    "thanks",
+    "institute",
     "label",
     "ref",
     "pageref",
@@ -168,6 +172,10 @@ def strip_latex_comments(text: str) -> str:
                 cursor = len(text) if closing < 0 else closing + 1
             result.append(text[index:cursor])
             index = cursor
+            continue
+        if text.startswith("\\%", index):
+            result.append("\\%")
+            index += 2
             continue
         if text[index] == "\\":
             command, end = _read_command(text, index)
@@ -432,8 +440,13 @@ def _separate_control_words(text: str) -> str:
 
 
 def validate_protected_structure(original: str, translated: str) -> None:
-    original_protected = [token.value for token in tokenize_latex(original) if token.kind == "protected"]
-    translated_protected = [token.value for token in tokenize_latex(translated) if token.kind == "protected"]
+    def normalize(value: str) -> str:
+        if re.fullmatch(r"\\[A-Za-z@]+[ \t]*", value):
+            return value.rstrip()
+        return value
+
+    original_protected = [normalize(token.value) for token in tokenize_latex(original) if token.kind == "protected"]
+    translated_protected = [normalize(token.value) for token in tokenize_latex(translated) if token.kind == "protected"]
     if original_protected != translated_protected:
         raise ProtectedRegionError("翻译结果中的 LaTeX 保护结构发生变化")
 

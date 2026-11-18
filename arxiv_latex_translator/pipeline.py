@@ -17,7 +17,7 @@ from typing import Any
 
 from .arxiv import ArxivIdentifier, download_source, extract_source, find_main_tex, parse_arxiv_input
 from .compiler import compile_latex
-from .latex import ProtectedRegionError, translate_latex, validate_protected_structure
+from .latex import ProtectedRegionError, strip_latex_comments, translate_latex, validate_protected_structure
 from .translator import CodexCliTranslator, TokenUsage, TranslationError
 
 
@@ -44,6 +44,8 @@ class Job:
     appendix_files: list[str] = field(default_factory=list)
     translate_appendix: bool = False
     codex_session_id: str | None = None
+    migration_retry_used: bool = False
+    config_key: str = ""
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
 
@@ -52,6 +54,7 @@ class Job:
         value.pop("pdf_path", None)
         value.pop("source_path", None)
         value.pop("log_path", None)
+        value.pop("codex_session_id", None)
         value["arxiv_url"] = f"https://arxiv.org/abs/{self.arxiv_id}"
         value["original_pdf_url"] = f"https://arxiv.org/pdf/{self.arxiv_id}"
         try:
@@ -82,7 +85,10 @@ class JobManager:
         self._load_jobs()
 
     def _job_dir(self, job_id: str) -> Path:
-        return self.base_dir / job_id
+        path = (self.base_dir / job_id).resolve()
+        if self.base_dir.resolve() not in path.parents:
+            raise ValueError("任务 ID 无效")
+        return path
 
     def _job_json(self, job_id: str) -> Path:
         return self._job_dir(job_id) / "job.json"
@@ -92,6 +98,8 @@ class JobManager:
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
                 job = Job(**{key: data[key] for key in Job.__dataclass_fields__ if key in data})
+                if not re.fullmatch(r"[A-Za-z0-9._-]+", job.id):
+                    raise ValueError("任务 ID 无效")
                 base = self.base_dir.resolve()
                 for path_value in (job.pdf_path, job.source_path, job.log_path):
                     if path_value and base not in Path(path_value).resolve().parents:
@@ -150,7 +158,12 @@ class JobManager:
         temp.replace(path)
 
     def _job_id(self, identifier: ArxivIdentifier) -> str:
-        config_key = "|".join(
+        digest = hashlib.sha256(f"{identifier.value}|{self._config_key()}".encode()).hexdigest()
+        return f"{identifier.base_id.replace('/', '-')}-{digest[:10]}"
+
+    @staticmethod
+    def _config_key() -> str:
+        return "|".join(
             os.environ.get(name, "")
             for name in (
                 "CODEX_EXECUTABLE",
@@ -163,8 +176,6 @@ class JobManager:
                 "LATEX_TIMEOUT_SECONDS",
             )
         )
-        digest = hashlib.sha256(f"{identifier.value}|{config_key}".encode()).hexdigest()
-        return f"{identifier.base_id.replace('/', '-')}-{digest[:10]}"
 
     def _reusable_job(self, identifier: ArxivIdentifier) -> Job | None:
         explicit_version = identifier.value != identifier.base_id
@@ -172,6 +183,8 @@ class JobManager:
             candidates = [job for job in self._jobs.values() if job.status == "completed"]
         candidates.sort(key=lambda job: job.updated_at, reverse=True)
         for job in candidates:
+            if job.config_key and job.config_key != self._config_key():
+                continue
             if job.arxiv_id == identifier.value:
                 return job
             if not explicit_version:
@@ -200,7 +213,7 @@ class JobManager:
                 return existing
             if existing and existing.attempts >= 3:
                 raise RuntimeError("该任务已达到三次尝试上限")
-            job = Job(id=job_id, source=source, arxiv_id=identifier.value)
+            job = Job(id=job_id, source=source, arxiv_id=identifier.value, config_key=self._config_key())
             job.attempts = (existing.attempts if existing else 0) + 1
             self._jobs[job.id] = job
             self._persist(job)
@@ -216,11 +229,12 @@ class JobManager:
             if job.status != "failed":
                 raise RuntimeError("只有失败任务可以重试")
             if job.attempts >= 3:
-                if not job.error or "保护结构" not in job.error:
+                if not job.error or "保护结构" not in job.error or job.migration_retry_used:
                     raise RuntimeError("该任务已达到三次尝试上限")
                 # Allow one migration retry for jobs stopped by the old
                 # marker-structure bug. The new fallback path is resumable.
                 job.attempts = 0
+                job.migration_retry_used = True
             job.status = "queued"
             job.phase = "queued"
             job.progress = min(job.progress, 89)
@@ -348,6 +362,7 @@ class JobManager:
                 )
                 self._log(log_path, f"downloaded {identifier.value} to {source_archive}")
                 extract_source(source_archive, extracted_dir)
+            self._strip_comments_in_tree(extracted_dir)
             root = find_main_tex(extracted_dir)
             self._log(log_path, f"main tex: {root.relative_to(extracted_dir)}")
 
@@ -357,6 +372,7 @@ class JobManager:
                 shutil.rmtree(translated_dir)
             if not translated_dir.exists():
                 shutil.copytree(extracted_dir, translated_dir)
+            self._strip_comments_in_tree(translated_dir)
             translated_root = translated_dir / root.relative_to(extracted_dir)
             def remember_session(session_id: str) -> None:
                 self._update(job, codex_session_id=session_id)
@@ -535,4 +551,12 @@ class JobManager:
             reasoning_output_tokens=usage.reasoning_output_tokens,
             total_tokens=usage.total_tokens,
         )
+
+    @staticmethod
+    def _strip_comments_in_tree(root: Path) -> None:
+        for tex_file in root.rglob("*.tex"):
+            source = tex_file.read_text(encoding="utf-8", errors="replace")
+            cleaned = strip_latex_comments(source)
+            if cleaned != source:
+                tex_file.write_text(cleaned, encoding="utf-8")
 

@@ -92,6 +92,12 @@ def test_percent_in_url_is_not_treated_as_a_comment() -> None:
     assert "comment" not in translated
 
 
+def test_escaped_percent_is_preserved() -> None:
+    translated, _ = translate_latex(r"50\% of text % comment", FakeTranslator())
+    assert r"50\% of text" in translated
+    assert "comment" not in translated
+
+
 def test_marker_failure_falls_back_to_original_chunk() -> None:
     class BrokenTranslator:
         def translate(self, prompt: str, *, cwd=None) -> str:

@@ -41,6 +41,12 @@ def test_token_usage_fields_survive_restart(tmp_path: Path) -> None:
     assert reloaded.cached_input_tokens == 20
 
 
+def test_codex_session_id_stays_internal(tmp_path: Path) -> None:
+    manager = JobManager(tmp_path / "jobs")
+    job = Job(id="job-session", source="2401.12345", arxiv_id="2401.12345", codex_session_id="thread-secret")
+    assert "codex_session_id" not in job.to_dict()
+
+
 def test_codex_auth_failure_is_exposed_as_disconnected(tmp_path: Path) -> None:
     manager = JobManager(tmp_path / "jobs")
     job = Job(
@@ -99,3 +105,29 @@ def test_retry_preserves_completed_translation_files(tmp_path: Path) -> None:
     assert retried.attempts == 2
     assert retried.translated_files == ["main.tex"]
     assert retried.message == "准备复用已下载源码重试"
+
+
+def test_protection_migration_retry_is_only_available_once(tmp_path: Path) -> None:
+    manager = JobManager(tmp_path / "jobs")
+    job = Job(
+        id="job-migration",
+        source="2401.12345",
+        arxiv_id="2401.12345",
+        status="failed",
+        attempts=3,
+        error="翻译结果中的 LaTeX 保护结构发生变化",
+    )
+    manager._jobs[job.id] = job
+    manager._run_with_limit = lambda job, resume=False: None
+    retried = manager.retry(job.id)
+    assert retried.attempts == 1
+    assert retried.migration_retry_used is True
+    retried.status = "failed"
+    retried.attempts = 3
+    retried.error = "翻译结果中的 LaTeX 保护结构发生变化"
+    try:
+        manager.retry(job.id)
+    except RuntimeError as exc:
+        assert "三次" in str(exc)
+    else:
+        raise AssertionError("migration retry should not reset the limit twice")
