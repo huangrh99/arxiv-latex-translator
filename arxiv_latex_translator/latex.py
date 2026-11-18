@@ -420,6 +420,28 @@ def _replace_markers(output: str, protected: dict[str, str]) -> str:
     return output
 
 
+def _translatable_text(text: str) -> str:
+    return "".join(token.value for token in tokenize_latex(strip_latex_comments(text)) if token.kind == "translatable")
+
+
+def looks_untranslated(original: str, translated: str) -> bool:
+    """Detect an agent response that preserves a substantial English prose span."""
+
+    original_text = _translatable_text(original)
+    translated_text = _translatable_text(translated)
+    original_words = re.findall(r"[A-Za-z][A-Za-z'-]*", original_text)
+    if len(original_words) < 8:
+        return False
+    if original_text.strip() == translated_text.strip():
+        return True
+    source_normalized = " ".join(original_words).casefold()
+    for match in re.finditer(r"(?:[A-Za-z][A-Za-z'-]*\s+){7}[A-Za-z][A-Za-z'-]*", translated_text):
+        phrase = " ".join(re.findall(r"[A-Za-z][A-Za-z'-]*", match.group(0))).casefold()
+        if phrase in source_normalized:
+            return True
+    return False
+
+
 def _separate_control_words(text: str) -> str:
     """Keep TeX control words from consuming adjacent CJK text."""
 
@@ -505,6 +527,8 @@ def translate_latex(
             try:
                 translated = worker.translate(retry_prompt, cwd=cwd)
                 translated = _replace_markers(translated, protected)
+                if looks_untranslated(translatable_content, re.sub(r"LATEXPROT\d{4}X", "", translated)):
+                    raise ProtectedRegionError("翻译结果保留了与原文高度相似的英文段落，疑似未翻译")
                 break
             except ProtectedRegionError as exc:
                 last_error = exc

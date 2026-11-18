@@ -17,7 +17,7 @@ from typing import Any
 
 from .arxiv import ArxivIdentifier, download_source, extract_source, find_main_tex, parse_arxiv_input
 from .compiler import compile_latex
-from .latex import ProtectedRegionError, strip_latex_comments, tokenize_latex, translate_latex, validate_protected_structure
+from .latex import ProtectedRegionError, looks_untranslated, strip_latex_comments, tokenize_latex, translate_latex, validate_protected_structure
 from .translator import CodexCliTranslator, TokenUsage, TranslationError
 
 
@@ -474,10 +474,13 @@ Compiler log:
                 if appendix_file and not job.translate_appendix:
                     appendix_files.add(relative_name)
                     continue
-                if relative_name in translated_files:
-                    continue
                 source_tex_file = extracted_dir / tex_file.relative_to(translated_dir)
                 original = source_tex_file.read_text(encoding="utf-8", errors="replace")
+                if relative_name in translated_files:
+                    translated_existing = tex_file.read_text(encoding="utf-8", errors="replace")
+                    if not looks_untranslated(original, translated_existing):
+                        continue
+                    translated_files.remove(relative_name)
                 marker = self._appendix_marker(original)
                 if marker and not job.translate_appendix:
                     main_source = original[: marker.end()]

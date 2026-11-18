@@ -5,7 +5,7 @@ import json
 import threading
 import time
 
-from arxiv_latex_translator.latex import tokenize_latex, translate_latex, validate_protected_structure
+from arxiv_latex_translator.latex import looks_untranslated, tokenize_latex, translate_latex, validate_protected_structure
 from arxiv_latex_translator.translator import CodexCliTranslator, CodexConfig
 
 
@@ -118,6 +118,23 @@ def test_failed_chunk_is_not_cached_as_a_translation() -> None:
     with pytest.raises(Exception):
         translate_latex(r"\section{Text} $x$", BrokenTranslator(), chunk_cache=cache)
     assert cache == {}
+
+
+def test_untranslated_english_chunk_is_retried() -> None:
+    class EchoTranslator:
+        def translate(self, prompt: str, *, cwd=None) -> str:
+            return prompt.split("<latex>\n", 1)[1].rsplit("\n</latex>", 1)[0]
+
+    with pytest.raises(Exception, match="英文段落"):
+        translate_latex("This is a sufficiently long English paragraph that must be translated.", EchoTranslator())
+
+
+def test_untranslated_detector_ignores_short_technical_text() -> None:
+    assert not looks_untranslated("GPT-6 Astra", "GPT-6 Astra")
+    assert looks_untranslated(
+        "This is a sufficiently long English paragraph that must be translated.",
+        "This is a sufficiently long English paragraph that must be translated.",
+    )
 
 
 def test_cached_fallback_is_retried_after_translator_recovers() -> None:
