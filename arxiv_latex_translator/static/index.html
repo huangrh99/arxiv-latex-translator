@@ -7,7 +7,8 @@
     <style>
       :root { color-scheme: light; font-family: Inter, system-ui, sans-serif; }
       body { margin: 0; min-height: 100vh; background: #f5f7fb; color: #172033; }
-      main { max-width: 780px; margin: 8vh auto; padding: 0 20px; }
+      main { max-width: 920px; margin: 8vh auto; padding: 0 20px; }
+      .stack { display: grid; gap: 18px; }
       .card { background: white; border: 1px solid #e2e7f0; border-radius: 18px; padding: 28px; box-shadow: 0 12px 36px rgba(27, 45, 80, .08); }
       h1 { margin: 0 0 8px; font-size: 28px; }
       p { color: #596579; line-height: 1.6; }
@@ -20,24 +21,43 @@
       a { color: #2457d6; margin-right: 14px; }
       .error { color: #b42318; white-space: pre-wrap; }
       .success { color: #16764a; }
+      .history-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+      .history-head h2 { margin: 0; font-size: 19px; }
+      .history-search { max-width: 300px; padding: 10px 12px; font-size: 14px; }
+      .history-list { display: grid; gap: 10px; margin-top: 16px; }
+      .history-item { width: 100%; text-align: left; border: 1px solid #e2e7f0; background: #fbfcff; border-radius: 12px; padding: 13px 14px; cursor: pointer; }
+      .history-item:hover { border-color: #9db4ee; background: #f4f7ff; }
+      .history-main { display: flex; justify-content: space-between; gap: 12px; }
+      .history-id { font-weight: 700; }
+      .history-meta { color: #697589; font-size: 13px; margin-top: 6px; }
+      .history-empty { color: #697589; padding: 12px 0; }
     </style>
   </head>
   <body>
     <main>
-      <section class="card">
-        <h1>ArXiv LaTeX Translator</h1>
-        <p>输入 arXiv 链接或论文 ID。工具会保护公式、图片和表格内容，翻译正文与 caption，再编译中文 PDF。</p>
-        <form id="job-form">
-          <label for="source">arXiv 链接或 ID</label>
-          <input id="source" name="source" placeholder="例如 2401.12345 或 https://arxiv.org/abs/2401.12345" required>
-          <button id="submit" type="submit">开始翻译</button>
-        </form>
-        <div id="status" hidden>
-          <div id="message"></div>
-          <progress id="progress" max="100" value="0"></progress>
-          <div id="links" style="margin-top: 14px"></div>
-        </div>
-      </section>
+      <div class="stack">
+        <section class="card">
+          <h1>ArXiv LaTeX Translator</h1>
+          <p>输入 arXiv 链接或论文 ID。工具会保护公式、图片和表格内容，翻译正文与 caption，再编译中文 PDF。</p>
+          <form id="job-form">
+            <label for="source">arXiv 链接或 ID</label>
+            <input id="source" name="source" placeholder="例如 2401.12345 或 https://arxiv.org/abs/2401.12345" required>
+            <button id="submit" type="submit">开始翻译</button>
+          </form>
+          <div id="status" hidden>
+            <div id="message"></div>
+            <progress id="progress" max="100" value="0"></progress>
+            <div id="links" style="margin-top: 14px"></div>
+          </div>
+        </section>
+        <section class="card">
+          <div class="history-head">
+            <h2>历史翻译</h2>
+            <input id="history-query" class="history-search" placeholder="搜索 arXiv ID 或链接" aria-label="搜索历史翻译">
+          </div>
+          <div id="history-list" class="history-list"><div class="history-empty">正在读取历史任务…</div></div>
+        </section>
+      </div>
     </main>
     <script>
       const form = document.getElementById('job-form');
@@ -46,7 +66,38 @@
       const message = document.getElementById('message');
       const progress = document.getElementById('progress');
       const links = document.getElementById('links');
+      const historyQuery = document.getElementById('history-query');
+      const historyList = document.getElementById('history-list');
       let timer;
+
+      function escapeHtml(value) {
+        return String(value).replace(/[&<>'"]/g, character => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[character]));
+      }
+
+      function historyStatus(job) {
+        const labels = {completed: '已完成', failed: '失败', running: '进行中', queued: '排队中'};
+        return labels[job.status] || job.status;
+      }
+
+      function renderHistory(jobs) {
+        if (!jobs.length) {
+          historyList.innerHTML = '<div class="history-empty">没有匹配的历史任务</div>';
+          return;
+        }
+        historyList.innerHTML = jobs.map(job => {
+          const updated = job.updated_at ? new Date(job.updated_at * 1000).toLocaleString() : '';
+          const tokens = Number.isFinite(job.total_tokens) ? ` · ${job.total_tokens} tokens` : '';
+          return `<button class="history-item" data-job-id="${escapeHtml(job.id)}"><div class="history-main"><span class="history-id">${escapeHtml(job.arxiv_id)}</span><span>${historyStatus(job)}</span></div><div class="history-meta">${escapeHtml(updated)}${tokens}</div></button>`;
+        }).join('');
+      }
+
+      async function loadHistory() {
+        const query = encodeURIComponent(historyQuery.value.trim());
+        const response = await fetch(`/api/jobs?query=${query}`);
+        if (!response.ok) return;
+        const data = await response.json();
+        renderHistory(data.jobs || []);
+      }
 
       function showJob(job) {
         statusBox.hidden = false;
@@ -58,10 +109,12 @@
           links.innerHTML = `<a href="${job.pdf_url}" target="_blank">打开 PDF</a><a href="${job.source_url}">下载翻译源码</a><a href="${job.log_url}" target="_blank">查看日志</a>`;
           button.disabled = false;
           clearInterval(timer);
+          loadHistory();
         } else if (job.status === 'failed') {
           links.innerHTML = job.log_url ? `<a href="${job.log_url}" target="_blank">查看日志</a>` : '';
           button.disabled = false;
           clearInterval(timer);
+          loadHistory();
         }
       }
 
@@ -87,6 +140,20 @@
         showJob(job);
         timer = setInterval(() => poll(job.id), 1000);
       });
+
+      historyList.addEventListener('click', event => {
+        const item = event.target.closest('[data-job-id]');
+        if (!item) return;
+        poll(item.dataset.jobId);
+      });
+
+      let historyTimer;
+      historyQuery.addEventListener('input', () => {
+        clearTimeout(historyTimer);
+        historyTimer = setTimeout(loadHistory, 200);
+      });
+
+      loadHistory();
     </script>
   </body>
 </html>

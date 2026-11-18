@@ -8,7 +8,7 @@ import os
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from .pipeline import JobManager
 
@@ -57,6 +57,11 @@ class TranslatorHandler(BaseHTTPRequestHandler):
             return
         if path == "/healthz":
             self._json({"status": "ok"})
+            return
+        if path == "/api/jobs":
+            query = parse_qs(parsed.query).get("query", [""])[0]
+            jobs = self.manager.list(query)
+            self._json({"jobs": [job.to_dict() for job in jobs], "count": len(jobs)})
             return
         parts = path.split("/")
         if len(parts) == 4 and parts[1:3] == ["api", "jobs"]:

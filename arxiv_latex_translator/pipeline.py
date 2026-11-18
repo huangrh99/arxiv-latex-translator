@@ -151,6 +151,21 @@ class JobManager:
         with self._lock:
             return self._jobs.get(job_id)
 
+    def list(self, query: str = "", limit: int = 100) -> list[Job]:
+        needle = query.strip().casefold()
+        with self._lock:
+            jobs = list(self._jobs.values())
+        if needle:
+            jobs = [
+                job
+                for job in jobs
+                if needle in job.arxiv_id.casefold()
+                or needle in job.source.casefold()
+                or needle in job.id.casefold()
+            ]
+        jobs.sort(key=lambda job: job.updated_at, reverse=True)
+        return jobs[: max(limit, 0)]
+
     def _update(self, job: Job, **changes: Any) -> None:
         with self._lock:
             for key, value in changes.items():
