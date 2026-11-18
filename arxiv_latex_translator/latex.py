@@ -26,6 +26,7 @@ class Token:
 class TranslationStats:
     chunks: int
     characters: int
+    fallbacks: int = 0
 
 
 PROTECTED_ENVIRONMENTS = {
@@ -389,6 +390,7 @@ def translate_latex(
     chunks = _make_chunks(tokens, max_chars)
     translated_chunks: list[str] = []
     translated_characters = 0
+    fallback_count = 0
     for chunk_index, (content, protected, _) in enumerate(chunks):
         cache_key = str(chunk_index)
         source_hash = __import__("hashlib").sha256(content.encode("utf-8")).hexdigest()
@@ -423,7 +425,11 @@ def translate_latex(
                 retry_prompt += "Return the same content again with every marker restored exactly once and in the required order."
         else:
             assert last_error is not None
-            raise last_error
+            # Preserve a compilable LaTeX chunk when the model repeatedly
+            # violates the marker contract. The task continues and the
+            # untranslated chunk is recorded in the aggregate statistics.
+            translated = _replace_markers(content, protected)
+            fallback_count += 1
         translated_chunks.append(translated)
         translated_characters += len(content)
         entry = {"source_hash": source_hash, "translated": translated}
@@ -431,4 +437,4 @@ def translate_latex(
             chunk_cache[cache_key] = entry
         if on_chunk_cached is not None:
             on_chunk_cached(cache_key, entry)
-    return _separate_control_words("".join(translated_chunks)), TranslationStats(len(chunks), translated_characters)
+    return _separate_control_words("".join(translated_chunks)), TranslationStats(len(chunks), translated_characters, fallback_count)

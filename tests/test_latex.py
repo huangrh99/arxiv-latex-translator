@@ -68,6 +68,16 @@ def test_emph_command_is_not_split_by_cjk_spacing() -> None:
     assert r"\em ph" not in translated
 
 
+def test_marker_failure_falls_back_to_original_chunk() -> None:
+    class BrokenTranslator:
+        def translate(self, prompt: str, *, cwd=None) -> str:
+            return "broken output"
+
+    translated, stats = translate_latex(r"\section{Text} $x$", BrokenTranslator())
+    assert translated == r"\section{Text} $x$"
+    assert stats.fallbacks == 1
+
+
 def test_inline_verbatim_and_protected_structure_are_preserved() -> None:
     source = r"Text \verb|a_b| and \lstinline|x+y|."
     translated, _ = translate_latex(source, FakeTranslator())

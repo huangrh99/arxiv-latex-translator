@@ -377,6 +377,7 @@ class JobManager:
 
             total_chunks = 0
             total_characters = 0
+            total_fallbacks = 0
             for index, tex_file in enumerate(tex_files, start=1):
                 relative_name = str(tex_file.relative_to(translated_dir))
                 if self._is_appendix_file(relative_name) and not job.translate_appendix:
@@ -400,6 +401,7 @@ class JobManager:
                 translated_files.add(relative_name)
                 total_chunks += stats.chunks
                 total_characters += stats.characters
+                total_fallbacks += stats.fallbacks
                 usage = translator.total_usage
                 self._update(
                     job,
@@ -416,10 +418,11 @@ class JobManager:
             usage = translator.total_usage
             self._log(
                 log_path,
-                "translated files={} chunks={} characters={} input_tokens={} cached_input_tokens={} output_tokens={} reasoning_output_tokens={} total_tokens={}".format(
+                "translated files={} chunks={} characters={} fallbacks={} input_tokens={} cached_input_tokens={} output_tokens={} reasoning_output_tokens={} total_tokens={}".format(
                     len(tex_files),
                     total_chunks,
                     total_characters,
+                    total_fallbacks,
                     usage.input_tokens,
                     usage.cached_input_tokens,
                     usage.output_tokens,
@@ -450,7 +453,7 @@ class JobManager:
                 status="completed",
                 phase="completed",
                 progress=100,
-                message="翻译和编译已完成",
+                message="翻译和编译已完成" if total_fallbacks == 0 else f"翻译和编译已完成（{total_fallbacks} 个片段保留原文）",
                 pdf_path=str(result.pdf_path),
                 source_path=str(source_zip),
                 appendix_files=[] if job.translate_appendix else sorted(appendix_files),
