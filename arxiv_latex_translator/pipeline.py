@@ -44,6 +44,7 @@ class Job:
     reasoning_output_tokens: int = 0
     total_tokens: int = 0
     compile_failed: bool = False
+    compile_repair_attempts: int = 0
     translated_files: list[str] = field(default_factory=list)
     appendix_files: list[str] = field(default_factory=list)
     translate_appendix: bool = False
@@ -234,6 +235,7 @@ class JobManager:
             job.message = "准备复用已下载源码重试"
             job.error = None
             job.compile_failed = False
+            job.compile_repair_attempts = 0
             job.pdf_path = None
             job.source_path = None
             job.attempts += 1
@@ -346,11 +348,40 @@ class JobManager:
         with self._semaphore:
             self._run_compile_repair(job)
 
+    @staticmethod
+    def _compile_repair_limit() -> int:
+        try:
+            value = int(os.environ.get("ARXIV_MAX_COMPILE_REPAIRS", "3"))
+        except ValueError as exc:
+            raise ValueError("ARXIV_MAX_COMPILE_REPAIRS 必须是整数") from exc
+        return max(0, value)
+
+    def _start_automatic_compile_repair(self, job: Job) -> bool:
+        limit = self._compile_repair_limit()
+        if job.compile_repair_attempts >= limit:
+            return False
+        attempt = job.compile_repair_attempts + 1
+        self._update(
+            job,
+            status="running",
+            phase="compile",
+            progress=72,
+            message=f"正在自动修复 LaTeX 编译（{attempt}/{limit}）",
+            error=None,
+            compile_failed=True,
+        )
+        self._run_compile_repair(job)
+        return True
+
     def _run_compile_repair(self, job: Job) -> None:
         job_dir = self._job_dir(job.id)
         log_path = job_dir / "job.log"
         translated_dir = job_dir / "translated"
         try:
+            limit = self._compile_repair_limit()
+            if job.compile_repair_attempts >= limit:
+                raise RuntimeError("自动编译修复已达到上限")
+            self._update(job, compile_repair_attempts=job.compile_repair_attempts + 1)
             root = find_main_tex(translated_dir)
             self._update(job, status="running", phase="compile", progress=70, message="Codex 正在修复 LaTeX 编译")
             log_text = log_path.read_text(encoding="utf-8", errors="replace") if log_path.is_file() else ""
@@ -669,6 +700,8 @@ Compiler log:
             self._log(log_path, result.stdout)
             self._log(log_path, result.stderr)
             if result.returncode != 0 or result.pdf_path is None:
+                if self._start_automatic_compile_repair(job):
+                    return
                 raise RuntimeError("LaTeX 编译失败，请查看编译日志")
 
             self._update(job, phase="package", progress=90, message="正在打包翻译后的源码")

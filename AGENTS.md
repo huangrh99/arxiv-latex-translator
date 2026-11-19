@@ -23,8 +23,9 @@ This file contains maintenance and implementation guidance for agents working in
 
 ## Compiler repair
 
-- A failed compile remains visible as a failed job with its compiler log and translated work tree.
-- The web-triggered repair action may grant Codex workspace write access only inside that translated work tree. Recompile after the repair and retain the repair log.
+- A compile failure automatically invokes Codex repair inside the translated work tree and recompiles the document. The default limit is three repair attempts and is controlled by `ARXIV_MAX_COMPILE_REPAIRS`.
+- Each repair receives the latest compiler log and must preserve formulas, citations, labels, tables, figures, and paper content.
+- A failed compile remains visible with its compiler log and translated work tree after the automatic repair limit is exhausted.
 - Preserve the original source archive and extracted source during repair and resume.
 
 ## Verification

@@ -115,3 +115,19 @@ def test_retry_has_no_attempt_limit(tmp_path: Path) -> None:
     manager._run_with_limit = lambda job, resume=False: None
     retried = manager.retry(job.id)
     assert retried.attempts == 4
+
+
+def test_compile_repair_runs_automatically_with_a_bounded_counter(tmp_path: Path, monkeypatch) -> None:
+    manager = JobManager(tmp_path / "jobs")
+    job = Job(id="job-compile", source="2401.12345", arxiv_id="2401.12345", status="running")
+    manager._jobs[job.id] = job
+    manager._run_compile_repair = lambda current: manager._update(
+        current, compile_repair_attempts=current.compile_repair_attempts + 1
+    )
+    monkeypatch.setenv("ARXIV_MAX_COMPILE_REPAIRS", "2")
+
+    assert manager._start_automatic_compile_repair(job) is True
+    assert job.compile_repair_attempts == 1
+    assert "自动修复" in job.message
+    job.compile_repair_attempts = 2
+    assert manager._start_automatic_compile_repair(job) is False

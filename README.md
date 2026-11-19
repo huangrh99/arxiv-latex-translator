@@ -82,7 +82,7 @@ tailscale serve --bg --set-path /arxiv-translator 8000
 
 默认优先使用 `latexmk -xelatex`，其次使用 `xelatex`，最后使用 `tectonic`。可以用 `LATEX_COMMAND` 指定完整命令，例如 `LATEX_COMMAND='latexmk -xelatex'`。编译超时由 `LATEX_TIMEOUT_SECONDS` 控制。
 
-编译失败会保留日志和翻译工作目录。页面会显示「让 Codex 修复编译」按钮，点击后让 Codex 根据编译日志修复当前翻译目录并重新编译。
+编译失败后，服务会自动让 Codex 根据编译日志修复当前翻译目录并重新编译，最多自动尝试 3 次。每次修复都会保留日志和翻译工作目录。自动修复仍失败时，页面只提供复用源码重试和查看日志。
 
 检测到中文内容时，编译器会扫描主文件及其 `\input`、`\include` 子文件，为没有 CJK 支持的文档注入 `xeCJK` 和 macOS 的 `Songti SC` 字体设置，并关闭 `microtype` 的自动字形探测，避免中文字体触发 XeTeX 错误。使用自定义编译命令时，需要确保该命令支持 XeLaTeX 和 CJK 字体。
 
