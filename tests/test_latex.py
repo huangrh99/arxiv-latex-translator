@@ -5,7 +5,7 @@ import json
 import threading
 import time
 
-from arxiv_latex_translator.latex import looks_untranslated, tokenize_latex, translate_latex, validate_protected_structure
+from arxiv_latex_translator.latex import _make_chunks, looks_untranslated, tokenize_latex, translate_latex, validate_protected_structure
 from arxiv_latex_translator.translator import CodexCliTranslator, CodexConfig, TranslationError
 
 
@@ -35,6 +35,15 @@ Plain text $x^2$ \cite{paper}.
     assert "\\cite{paper}" in translated
     assert "A & B" in translated
     assert stats.chunks >= 1
+
+
+def test_chunks_accumulate_complete_lines_to_target() -> None:
+    source = "a" * 600 + "\n" + "b" * 600 + "\n" + "c" * 600 + "\n"
+    chunks = _make_chunks(tokenize_latex(source), 1000)
+    assert len(chunks) == 2
+    assert chunks[0][0].endswith("\n")
+    assert len(chunks[0][0]) >= 1000
+    assert "\n" in chunks[1][0]
 
 
 def test_tokenizer_keeps_macro_definition_as_one_protected_region() -> None:

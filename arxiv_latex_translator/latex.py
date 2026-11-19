@@ -371,52 +371,108 @@ def tokenize_latex(text: str) -> list[Token]:
 
 
 def _make_chunks(tokens: list[Token], max_chars: int) -> list[tuple[str, dict[str, str], list[int]]]:
+    max_chars = max(1, max_chars)
     chunks: list[tuple[str, dict[str, str], list[int]]] = []
-    prompt_parts: list[str] = []
-    protected: dict[str, str] = {}
-    token_indexes: list[int] = []
-    length = 0
     marker_number = 0
 
-    def flush() -> None:
-        nonlocal prompt_parts, protected, token_indexes, length
-        if prompt_parts:
-            chunks.append(("".join(prompt_parts), protected, token_indexes))
-        prompt_parts = []
-        protected = {}
-        token_indexes = []
-        length = 0
+    # Build logical lines first. Protected regions stay atomic even when they
+    # span several physical lines. Ordinary text is split only at newlines.
+    lines: list[tuple[list[tuple[str, str | None]], dict[str, str], list[int]]] = []
+    line_parts: list[tuple[str, str | None]] = []
+    line_protected: dict[str, str] = {}
+    line_indexes: list[int] = []
+
+    def flush_line() -> None:
+        nonlocal line_parts, line_protected, line_indexes
+        if line_parts:
+            lines.append((line_parts, line_protected, line_indexes))
+        line_parts = []
+        line_protected = {}
+        line_indexes = []
 
     for token_index, token in enumerate(tokens):
         if token.kind == "protected":
             marker_number += 1
             marker = f"LATEXPROT{marker_number:04d}X"
-            value = marker
-            protected[marker] = token.value
-            prompt_parts.append(value)
-            token_indexes.append(token_index)
-            length += len(value)
-        else:
-            value = token.value
-            if length and length + len(value) > max_chars:
-                flush()
-            if len(value) > max_chars:
-                for start in range(0, len(value), max_chars):
-                    part = value[start : start + max_chars]
-                    if length + len(part) > max_chars:
-                        flush()
-                    prompt_parts.append(part)
-                    token_indexes.append(token_index)
-                    length += len(part)
-                    if length >= max_chars:
-                        flush()
-            else:
-                prompt_parts.append(value)
-                token_indexes.append(token_index)
-                length += len(value)
-        if length >= max_chars:
-            flush()
-    flush()
+            line_parts.append((marker, marker))
+            line_protected[marker] = token.value
+            line_indexes.append(token_index)
+            if "\n" in token.value:
+                flush_line()
+            continue
+        for part in token.value.splitlines(keepends=True):
+            if part:
+                line_parts.append((part, None))
+                line_indexes.append(token_index)
+            if part.endswith("\n"):
+                flush_line()
+    flush_line()
+
+    pending_parts: list[str] = []
+    pending_protected: dict[str, str] = {}
+    pending_indexes: list[int] = []
+    pending_length = 0
+
+    def flush_chunk() -> None:
+        nonlocal pending_parts, pending_protected, pending_indexes, pending_length
+        if pending_parts:
+            chunks.append(("".join(pending_parts), pending_protected, pending_indexes))
+        pending_parts = []
+        pending_protected = {}
+        pending_indexes = []
+        pending_length = 0
+
+    for parts, protected, indexes in lines:
+        # A very long line is the only case where a chunk may split inside a
+        # line. Protected markers remain indivisible in that fallback path.
+        fragments: list[tuple[str, dict[str, str], list[int]]] = []
+        fragment_parts: list[str] = []
+        fragment_protected: dict[str, str] = {}
+        fragment_indexes: list[int] = []
+        fragment_length = 0
+
+        def flush_fragment() -> None:
+            nonlocal fragment_parts, fragment_protected, fragment_indexes, fragment_length
+            if fragment_parts:
+                fragments.append(("".join(fragment_parts), fragment_protected, fragment_indexes))
+            fragment_parts = []
+            fragment_protected = {}
+            fragment_indexes = []
+            fragment_length = 0
+
+        for value, marker in parts:
+            if marker is not None:
+                if fragment_length and fragment_length + len(value) > max_chars:
+                    flush_fragment()
+                fragment_parts.append(value)
+                fragment_protected[marker] = protected[marker]
+                fragment_indexes.append(indexes[0] if indexes else 0)
+                fragment_length += len(value)
+                continue
+            remaining = value
+            while remaining:
+                available = max_chars - fragment_length
+                if available == 0:
+                    flush_fragment()
+                    available = max_chars
+                fragment_parts.append(remaining[:available])
+                fragment_indexes.extend(indexes[:1])
+                fragment_length += min(len(remaining), available)
+                remaining = remaining[available:]
+                if fragment_length >= max_chars:
+                    flush_fragment()
+        flush_fragment()
+
+        for value, fragment_protected, fragment_indexes in fragments:
+            pending_parts.append(value)
+            pending_protected.update(fragment_protected)
+            pending_indexes.extend(fragment_indexes)
+            pending_length += len(value)
+            # Flush only after a complete line or an oversized-line fragment
+            # reaches the target. Normal chunks therefore end at line breaks.
+            if pending_length >= max_chars:
+                flush_chunk()
+    flush_chunk()
     return chunks
 
 

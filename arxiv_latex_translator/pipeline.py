@@ -521,7 +521,7 @@ Compiler log:
                 output_tokens=job.output_tokens,
                 reasoning_output_tokens=job.reasoning_output_tokens,
             )
-            chunk_chars = int(os.environ.get("CODEX_CHUNK_CHARS", "1600"))
+            chunk_chars = int(os.environ.get("CODEX_CHUNK_CHARS", "1000"))
             chunk_parallel = int(os.environ.get("CODEX_MAX_PARALLEL_CHUNKS", "3"))
             if chunk_parallel <= 0:
                 raise ValueError("CODEX_MAX_PARALLEL_CHUNKS 必须大于 0")
