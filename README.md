@@ -59,7 +59,7 @@ tailscale serve --bg --set-path /arxiv-translator 8000
 
 然后把生成的 HTTPS 地址和路径写入个人主页仓库的 `arxiv-translator/config.js`。访问页面的设备需要加入同一个 tailnet。当前 GitHub Pages 前端只保存代码，任务目录、PDF、源码归档和日志都保存在 Mac mini 的 `ARXIV_OUTPUT_DIR` 中。
 
-任务状态会记录 Codex CLI 返回的 `input_tokens`、`cached_input_tokens`、`output_tokens`、`reasoning_output_tokens` 和 `total_tokens`。其中 `total_tokens` 按输入 token 加输出 token 计算，重复调用和保护标记修复调用也会计入。
+任务状态会记录 Codex CLI 返回的 `input_tokens`、`cached_input_tokens`、`output_tokens`、`reasoning_output_tokens` 和 `total_tokens`。其中 `total_tokens` 按输入 token 加输出 token 计算，`cached_input_tokens` 是输入 token 的缓存子集。页面同时显示未缓存的新输入和输出，方便区分实际新增上下文与累计调用量。
 
 ## Codex CLI 配置
 
@@ -74,7 +74,7 @@ tailscale serve --bg --set-path /arxiv-translator 8000
 | `CODEX_WORKDIR` | 空 | Codex 工作目录 |
 | `CODEX_EXTRA_ARGS` | 空 | 额外 CLI 参数 |
 | `CODEX_TIMEOUT_SECONDS` | `600` | 单个翻译块超时 |
-| `CODEX_CHUNK_CHARS` | `800` | 单个翻译块的最大字符数，减少单块保护标记数量 |
+| `CODEX_CHUNK_CHARS` | `1600` | 单个翻译块的最大字符数，较大的块可减少重复提示词开销 |
 | `CODEX_MAX_PARALLEL_CHUNKS` | `3` | 同一 TeX 文件同时翻译的块数 |
 | `CODEX_REASONING_EFFORT` | `medium` | Codex CLI 的 reasoning effort |
 | `ARXIV_MAX_COMPILE_REPAIRS` | `3` | 编译失败后自动调用 Codex 修复的最大次数 |
