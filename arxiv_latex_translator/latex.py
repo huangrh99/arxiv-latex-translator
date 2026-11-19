@@ -527,7 +527,10 @@ def translate_latex(
         ):
             cache_structure_valid = True
             try:
-                validate_protected_structure(content, cached["translated"])
+                cache_source = content
+                for marker, protected_value in protected.items():
+                    cache_source = cache_source.replace(marker, protected_value, 1)
+                validate_protected_structure(cache_source, cached["translated"])
             except ProtectedRegionError:
                 cache_structure_valid = False
             if cache_structure_valid and not looks_untranslated(content, cached["translated"], require_no_cjk=True):
