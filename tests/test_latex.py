@@ -43,6 +43,12 @@ def test_tokenizer_keeps_macro_definition_as_one_protected_region() -> None:
     assert "\\newcommand" in tokens[0].value
 
 
+def test_cross_reference_commands_protect_targets() -> None:
+    source = r"See \Cref{fig:transfer} and \cref{sec:intro}."
+    protected = [token.value for token in tokenize_latex(source) if token.kind == "protected"]
+    assert protected == [r"\Cref{fig:transfer}", r"\cref{sec:intro}"]
+
+
 def test_href_url_stays_protected_and_optional_caption_text_is_translatable() -> None:
     source = r"\caption[Short caption]{Long caption} \href{https://example.com}{Plain text}"
     translated, _ = translate_latex(source, FakeTranslator())
