@@ -422,7 +422,15 @@ def _replace_markers(output: str, protected: dict[str, str]) -> str:
     if len(actual) != len(expected):
         raise ProtectedRegionError("翻译结果中的保护标记数量异常")
     if actual != expected:
-        raise ProtectedRegionError("翻译结果中的保护标记顺序发生变化")
+        if sorted(actual) != sorted(expected):
+            raise ProtectedRegionError("翻译结果中的保护标记顺序发生变化")
+        expected_markers = iter(expected)
+        output = re.sub(
+            r"LATEXPROT\d{4}X",
+            lambda _match: next(expected_markers),
+            output,
+        )
+        actual = expected
     for marker, expected_marker in zip(actual, expected):
         output = output.replace(marker, protected[expected_marker], 1)
     leftovers = re.findall(r"LATEXPROT\d{4}X", output)
