@@ -1,4 +1,5 @@
 from pathlib import Path
+import time
 
 from arxiv_latex_translator.pipeline import Job, JobManager
 
@@ -58,7 +59,23 @@ def test_codex_auth_failure_is_exposed_as_disconnected(tmp_path: Path) -> None:
     manager._jobs[job.id] = job
     manager._persist(job)
     reloaded = JobManager(tmp_path / "jobs")
-    assert reloaded.codex_status()["status"] == "unknown"
+    assert reloaded.codex_status()["status"] == "checking"
+
+
+def test_codex_login_probe_reports_connected(tmp_path: Path, monkeypatch) -> None:
+    manager = JobManager(tmp_path / "jobs")
+
+    def fake_run(*args, **kwargs):
+        return type("Result", (), {"returncode": 0, "stdout": "Logged in using ChatGPT", "stderr": ""})()
+
+    monkeypatch.setattr("arxiv_latex_translator.pipeline.subprocess.run", fake_run)
+    manager._codex_probe_at = 0
+    manager.refresh_codex_status()
+    for _ in range(20):
+        if manager.codex_status()["status"] == "connected":
+            break
+        time.sleep(0.01)
+    assert manager.codex_status()["status"] == "connected"
 
 
 def test_completed_translation_is_reused_for_same_arxiv_id(tmp_path: Path) -> None:

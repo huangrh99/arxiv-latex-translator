@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import threading
 import time
 import uuid
@@ -19,7 +20,7 @@ from .arxiv import ArxivIdentifier, download_source, extract_source, find_main_t
 from .compiler import compile_latex
 from .latex import ProtectedRegionError, _read_balanced, looks_untranslated, strip_latex_comments, tokenize_latex, translate_latex
 from .pricing import configured_pricing_model, token_cost
-from .translator import CodexCliTranslator, TokenUsage, TranslationError
+from .translator import CodexCliTranslator, CodexConfig, TokenUsage, TranslationError
 
 
 TRANSLATION_CACHE_VERSION = "latex-protection-v3"
@@ -93,6 +94,8 @@ class JobManager:
             "message": "等待首次 Codex CLI 调用",
             "checked_at": None,
         }
+        self._codex_probe_at = 0.0
+        self._codex_probe_lock = threading.Lock()
         self._semaphore = threading.Semaphore(int(os.environ.get("ARXIV_MAX_CONCURRENT_JOBS", "1")))
         self._load_jobs()
 
@@ -159,7 +162,44 @@ class JobManager:
                 "checked_at": time.time(),
             }
 
+    def _probe_codex_login(self) -> None:
+        try:
+            config = CodexConfig.from_env()
+            result = subprocess.run(
+                [config.executable, "login", "status"],
+                capture_output=True,
+                text=True,
+                timeout=min(config.timeout_seconds, 10),
+                check=False,
+            )
+            detail = (result.stdout or result.stderr or "").strip()
+            if result.returncode == 0:
+                self._set_codex_status("connected", "Codex CLI 已登录，可开始翻译")
+            elif self._is_codex_auth_error(detail):
+                self._set_codex_status("disconnected", "Codex CLI 未登录或认证已失效")
+            else:
+                self._set_codex_status("error", detail[-300:] or "Codex CLI 登录状态检查失败")
+        except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+            self._set_codex_status("error", f"Codex CLI 状态检查失败：{exc}")
+
+    def refresh_codex_status(self) -> None:
+        now = time.time()
+        with self._codex_probe_lock:
+            if now - self._codex_probe_at < 30:
+                return
+            with self._lock:
+                if self._codex_status["status"] == "checking":
+                    return
+                self._codex_status = {
+                    "status": "checking",
+                    "message": "正在检查 Codex CLI 登录状态",
+                    "checked_at": now,
+                }
+            self._codex_probe_at = now
+        threading.Thread(target=self._probe_codex_login, daemon=True).start()
+
     def codex_status(self) -> dict[str, Any]:
+        self.refresh_codex_status()
         with self._lock:
             return dict(self._codex_status)
 
@@ -750,6 +790,7 @@ Compiler log:
                 translate_appendix=False,
                 compile_failed=False,
             )
+            self._set_codex_status("connected", "Codex CLI 可用，最近任务已完成")
         except Exception as exc:
             self._log(log_path, f"ERROR: {exc}")
             if isinstance(exc, TranslationError):
