@@ -17,7 +17,7 @@ from typing import Any
 
 from .arxiv import ArxivIdentifier, download_source, extract_source, find_main_tex, parse_arxiv_input
 from .compiler import compile_latex
-from .latex import ProtectedRegionError, looks_untranslated, strip_latex_comments, tokenize_latex, translate_latex
+from .latex import ProtectedRegionError, _read_balanced, looks_untranslated, strip_latex_comments, tokenize_latex, translate_latex
 from .translator import CodexCliTranslator, TokenUsage, TranslationError
 
 
@@ -397,6 +397,47 @@ Compiler log:
             masked.append(value)
         return re.search(r"(?m)^\s*\\appendix\b", "".join(masked))
 
+    def _translate_table_captions(
+        self,
+        text: str,
+        translator: CodexCliTranslator,
+        *,
+        max_chars: int,
+        max_parallel: int,
+        cwd: Path,
+        log_path: Path,
+        relative_name: str,
+    ) -> tuple[str, int, int]:
+        result: list[str] = []
+        cursor = 0
+        chunks = 0
+        characters = 0
+        pattern = re.compile(r"\\caption(?:\[[^]]*\])?\s*\{")
+        for match in pattern.finditer(text):
+            body_start = match.end() - 1
+            body_end = _read_balanced(text, body_start)
+            if body_end <= body_start or text[body_start] != "{":
+                continue
+            result.append(text[cursor : body_start + 1])
+            original_caption = text[body_start + 1 : body_end - 1]
+            try:
+                translated_caption, stats = translate_latex(
+                    original_caption,
+                    translator,
+                    max_chars=max_chars,
+                    max_parallel=max_parallel,
+                    cwd=cwd,
+                )
+                result.append(translated_caption)
+                chunks += stats.chunks
+                characters += stats.characters
+            except Exception as exc:
+                self._log(log_path, f"table caption preserved: {relative_name}: {exc}")
+                result.append(original_caption)
+            cursor = body_end - 1
+        result.append(text[cursor:])
+        return "".join(result), chunks, characters
+
     def _run(self, job: Job, *, resume: bool = False) -> None:
         job_dir = self._job_dir(job.id)
         log_path = job_dir / "job.log"
@@ -492,6 +533,31 @@ Compiler log:
                     if not looks_untranslated(original, translated_existing):
                         continue
                     translated_files.remove(relative_name)
+                if "tables" in {part.casefold() for part in Path(relative_name).parts}:
+                    translated, table_chunks, table_characters = self._translate_table_captions(
+                        original,
+                        translator,
+                        max_chars=chunk_chars,
+                        max_parallel=chunk_parallel,
+                        cwd=job_dir,
+                        log_path=log_path,
+                        relative_name=relative_name,
+                    )
+                    tex_file.write_text(translated, encoding="utf-8")
+                    translated_files.add(relative_name)
+                    self._update(
+                        job,
+                        translated_files=sorted(translated_files),
+                        appendix_files=sorted(appendix_files),
+                        input_tokens=translator.total_usage.input_tokens,
+                        cached_input_tokens=translator.total_usage.cached_input_tokens,
+                        output_tokens=translator.total_usage.output_tokens,
+                        reasoning_output_tokens=translator.total_usage.reasoning_output_tokens,
+                        total_tokens=translator.total_usage.total_tokens,
+                    )
+                    progress = 25 + int(index / total * 40)
+                    self._update(job, progress=progress, message=f"已翻译 {index}/{total} 个 TeX 文件")
+                    continue
                 marker = self._appendix_marker(original)
                 if relative_name == str(root.relative_to(extracted_dir)) and "\\begin{document}" in original:
                     # The root file is mostly a preamble containing package options,
