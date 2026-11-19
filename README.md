@@ -77,6 +77,7 @@ tailscale serve --bg --set-path /arxiv-translator 8000
 | `CODEX_CHUNK_CHARS` | `800` | 单个翻译块的最大字符数，减少单块保护标记数量 |
 | `CODEX_MAX_PARALLEL_CHUNKS` | `3` | 同一 TeX 文件同时翻译的块数 |
 | `CODEX_REASONING_EFFORT` | `medium` | Codex CLI 的 reasoning effort |
+| `ARXIV_MAX_COMPILE_REPAIRS` | `3` | 编译失败后自动调用 Codex 修复的最大次数 |
 
 ## LaTeX 配置
 

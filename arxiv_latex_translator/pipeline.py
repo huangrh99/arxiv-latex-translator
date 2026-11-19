@@ -177,6 +177,7 @@ class JobManager:
                 "CODEX_REASONING_EFFORT",
                 "LATEX_COMMAND",
                 "LATEX_TIMEOUT_SECONDS",
+                "ARXIV_MAX_COMPILE_REPAIRS",
             )
         )
 
