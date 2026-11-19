@@ -27,6 +27,11 @@ def test_health_and_invalid_job_request(tmp_path: Path) -> None:
     response = connection.getresponse()
     assert response.status == 200
     assert b"Arxiv Translation" in response.read()
+    for asset in ("/config.js", "/formatters.js", "/pdf-viewer.js"):
+        connection.request("GET", asset)
+        response = connection.getresponse()
+        assert response.status == 200
+        assert response.read()
     connection.request("GET", "/healthz")
     response = connection.getresponse()
     assert response.status == 200

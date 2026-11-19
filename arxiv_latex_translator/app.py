@@ -14,6 +14,11 @@ from .pipeline import JobManager
 
 
 STATIC_DIR = Path(__file__).parent / "static"
+STATIC_ASSETS = {
+    "config.js": ("config.js", "text/javascript; charset=utf-8"),
+    "formatters.js": ("formatters.js", "text/javascript; charset=utf-8"),
+    "pdf-viewer.js": ("pdf-viewer.js", "text/javascript; charset=utf-8"),
+}
 
 
 class TranslatorHandler(BaseHTTPRequestHandler):
@@ -55,6 +60,14 @@ class TranslatorHandler(BaseHTTPRequestHandler):
             while chunk := stream.read(1024 * 1024):
                 self.wfile.write(chunk)
 
+    def _send_static_asset(self, path: str, *, head_only: bool = False) -> bool:
+        asset = STATIC_ASSETS.get(path.lstrip("/"))
+        if asset is None:
+            return False
+        filename, content_type = asset
+        self._send_file(STATIC_DIR / filename, content_type, STATIC_DIR, head_only=head_only)
+        return True
+
     def do_OPTIONS(self) -> None:
         self.send_response(HTTPStatus.NO_CONTENT)
         self.send_header("Access-Control-Allow-Origin", "*")
@@ -74,6 +87,8 @@ class TranslatorHandler(BaseHTTPRequestHandler):
             return
         if path == "/reader.html":
             self._send_file(STATIC_DIR / "reader.html", "text/html; charset=utf-8", STATIC_DIR, head_only=True)
+            return
+        if self._send_static_asset(path, head_only=True):
             return
         parts = path.split("/")
         if len(parts) == 5 and parts[1:3] == ["api", "jobs"]:
@@ -109,6 +124,8 @@ class TranslatorHandler(BaseHTTPRequestHandler):
             return
         if path == "/reader.html":
             self._send_file(STATIC_DIR / "reader.html", "text/html; charset=utf-8", STATIC_DIR)
+            return
+        if self._send_static_asset(path):
             return
         if path == "/api/jobs":
             query = parse_qs(parsed.query).get("query", [""])[0]
