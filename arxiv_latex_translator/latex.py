@@ -431,6 +431,13 @@ def _replace_markers(output: str, protected: dict[str, str]) -> str:
     return output
 
 
+def _restore_chunk_source(content: str, protected: dict[str, str]) -> str:
+    restored = content
+    for marker, protected_value in protected.items():
+        restored = restored.replace(marker, protected_value, 1)
+    return restored
+
+
 def _translatable_text(text: str) -> str:
     text = strip_latex_comments(text)
     if "\\begin{document}" in text:
@@ -536,9 +543,7 @@ def translate_latex(
         ):
             cache_structure_valid = True
             try:
-                cache_source = content
-                for marker, protected_value in protected.items():
-                    cache_source = cache_source.replace(marker, protected_value, 1)
+                cache_source = _restore_chunk_source(content, protected)
                 validate_protected_structure(cache_source, cached["translated"])
             except ProtectedRegionError:
                 cache_structure_valid = False
@@ -557,6 +562,7 @@ def translate_latex(
         translatable_content = re.sub(r"LATEXPROT\d{4}X", "", content)
         if not translatable_content.strip():
             translated = _replace_markers(content, protected)
+            validate_protected_structure(_restore_chunk_source(content, protected), translated)
             return chunk_index, translated, {"source_hash": source_hash, "translated": translated, "fallback": "0"}, 0, None
 
         prompt = TRANSLATION_PROMPT.format(content=content)
@@ -569,6 +575,7 @@ def translate_latex(
             try:
                 translated = worker.translate(retry_prompt, cwd=cwd)
                 translated = _replace_markers(translated, protected)
+                validate_protected_structure(_restore_chunk_source(content, protected), translated)
                 if looks_untranslated(translatable_content, re.sub(r"LATEXPROT\d{4}X", "", translated), require_no_cjk=True):
                     raise ProtectedRegionError("翻译结果保留了与原文高度相似的英文段落，疑似未翻译")
                 break
@@ -591,6 +598,7 @@ def translate_latex(
                     # This chunk has no substantial prose. Preserve its protected
                     # LaTeX and short technical text without inventing a translation.
                     translated = _replace_markers(content, protected)
+                    validate_protected_structure(_restore_chunk_source(content, protected), translated)
                     return chunk_index, translated, {"source_hash": source_hash, "translated": translated, "fallback": "0"}, 0, (worker.total_usage if independent else None)
                 separator = "\nLATEXPLAINSEGMENT\n"
                 plain_prompt = PLAIN_TRANSLATION_PROMPT.format(content=separator.join(prose_parts))
@@ -618,6 +626,7 @@ def translate_latex(
                 if not recovered_any:
                     raise last_error
                 translated = _replace_markers("".join(recovered_parts), protected)
+                validate_protected_structure(_restore_chunk_source(content, protected), translated)
             except ProtectedRegionError as recovery_error:
                 raise ProtectedRegionError(f"Codex 连续三次返回无效 LaTeX 结构：{last_error}；纯文本恢复失败：{recovery_error}") from recovery_error
         usage = worker.total_usage if independent else None
@@ -646,6 +655,4 @@ def translate_latex(
                     on_chunk_cached(str(chunk_index), entry)
             if first_error is not None:
                 raise first_error
-    raw_result = "".join(translated_chunks)
-    validate_protected_structure(text, raw_result)
-    return _separate_control_words(raw_result), TranslationStats(len(chunks), translated_characters, fallback_count)
+    return _separate_control_words("".join(translated_chunks)), TranslationStats(len(chunks), translated_characters, fallback_count)

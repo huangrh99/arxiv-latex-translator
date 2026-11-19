@@ -17,7 +17,7 @@ from typing import Any
 
 from .arxiv import ArxivIdentifier, download_source, extract_source, find_main_tex, parse_arxiv_input
 from .compiler import compile_latex
-from .latex import ProtectedRegionError, looks_untranslated, strip_latex_comments, tokenize_latex, translate_latex, validate_protected_structure
+from .latex import ProtectedRegionError, looks_untranslated, strip_latex_comments, tokenize_latex, translate_latex
 from .translator import CodexCliTranslator, TokenUsage, TranslationError
 
 
@@ -546,11 +546,6 @@ Compiler log:
                     validation_source = original
                     validation_result = translated
                 self._set_codex_status("connected", "最近一次 Codex CLI 调用成功")
-                try:
-                    validate_protected_structure(validation_source, validation_result)
-                except ProtectedRegionError as exc:
-                    self._log(log_path, f"protected-structure validation failed: {relative_name}: {exc}")
-                    raise
                 if not appendix_file and looks_untranslated(validation_source, validation_result):
                     error = "翻译结果仍包含未翻译的英文段落，已阻止该文件进入编译"
                     self._log(log_path, f"translation-completeness validation failed: {relative_name}: {error}")
