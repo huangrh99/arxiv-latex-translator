@@ -28,12 +28,6 @@ codex login --device-auth
 
 按终端显示的链接和一次性验证码完成登录。登录凭据保存在用户目录的 `~/.codex/auth.json`，不属于项目仓库。
 
-运行测试：
-
-```bash
-python3 -m pytest
-```
-
 本地服务默认只监听 `127.0.0.1:8000`。如果要从其他设备访问，需要显式配置反向代理或 Tailscale Serve，不要直接把 Python 服务暴露到公网。
 
 ## Mac mini 后端与 GitHub Pages 前端
@@ -65,19 +59,11 @@ tailscale serve --bg --set-path /arxiv-translator 8000
 
 然后把生成的 HTTPS 地址和路径写入个人主页仓库的 `arxiv-translator/config.js`。访问页面的设备需要加入同一个 tailnet。当前 GitHub Pages 前端只保存代码，任务目录、PDF、源码归档和日志都保存在 Mac mini 的 `ARXIV_OUTPUT_DIR` 中。
 
-当前论文数据不会写入个人主页仓库。仓库根目录的 `.stignore` 也忽略 `arxiv-latex-translator/data/`，避免误把默认本地任务目录交给 Syncthing。
-
-## 数据和凭据边界
-
-GitHub public repository 只包含程序源码、静态前端和测试。Codex 登录凭据保存在运行机器的 `~/.codex/auth.json`，不会放进仓库。论文源码、翻译后的源码、PDF、日志和 `job.json` 都应该放在仓库之外的任务目录。不要把 `auth.json`、`.env`、生成的 PDF 或 `data/` 目录手动加入 Git。
-
-公开代码仓库只公开程序实现。Tailscale tailnet 或其他访问控制仍然负责保护 Mac mini 后端和论文内容，公开代码仓库不会让任务数据或登录凭据变得可见。
-
 任务状态会记录 Codex CLI 返回的 `input_tokens`、`cached_input_tokens`、`output_tokens`、`reasoning_output_tokens` 和 `total_tokens`。其中 `total_tokens` 按输入 token 加输出 token 计算，重复调用和保护标记修复调用也会计入。
 
 ## Codex CLI 配置
 
-默认适配器执行独立的 `codex exec --skip-git-repo-check --sandbox read-only --color never --json -` 调用，reasoning effort 固定默认为 `medium`。任务续接依赖本地片段缓存，不依赖 Codex 对话会话。可用环境变量配置：
+可用环境变量配置：
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
@@ -96,7 +82,7 @@ GitHub public repository 只包含程序源码、静态前端和测试。Codex �
 
 默认优先使用 `latexmk -xelatex`，其次使用 `xelatex`，最后使用 `tectonic`。可以用 `LATEX_COMMAND` 指定完整命令，例如 `LATEX_COMMAND='latexmk -xelatex'`。编译超时由 `LATEX_TIMEOUT_SECONDS` 控制。
 
-编译失败会保留日志和翻译工作目录。页面会显示「让 Codex 修复编译」按钮，点击后调用一次带工作区写权限的 Codex CLI，让它读取编译日志、修改当前翻译目录并重新编译。原始源码归档、图片资源和任务元数据不会交给它修改。
+编译失败会保留日志和翻译工作目录。页面会显示「让 Codex 修复编译」按钮，点击后让 Codex 根据编译日志修复当前翻译目录并重新编译。
 
 检测到中文内容时，编译器会扫描主文件及其 `\input`、`\include` 子文件，为没有 CJK 支持的文档注入 `xeCJK` 和 macOS 的 `Songti SC` 字体设置，并关闭 `microtype` 的自动字形探测，避免中文字体触发 XeTeX 错误。使用自定义编译命令时，需要确保该命令支持 XeLaTeX 和 CJK 字体。
 
@@ -121,9 +107,3 @@ GitHub public repository 只包含程序源码、静态前端和测试。Codex �
 ## 保护规则
 
 数学公式、LaTeX 结构、引用、标签、URL、图片命令、宏定义、表格环境及表格单元格会被保护。图片文件和参考文献条目保持原文。caption 允许翻译。
-
-## 测试
-
-```bash
-python3 -m pytest
-```
