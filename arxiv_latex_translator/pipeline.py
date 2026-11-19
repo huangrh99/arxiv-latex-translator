@@ -577,6 +577,8 @@ Compiler log:
                     )
                     tex_file.write_text(translated, encoding="utf-8")
                     translated_files.add(relative_name)
+                    total_chunks += table_chunks
+                    total_characters += table_characters
                     self._update(
                         job,
                         translated_files=sorted(translated_files),
