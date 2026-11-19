@@ -166,6 +166,10 @@ def test_untranslated_detector_ignores_short_technical_text() -> None:
         "This is a sufficiently long English paragraph that must be translated.",
         "This is a sufficiently long English paragraph that must be translated.",
     )
+    assert looks_untranslated(
+        "中文开头。 This is a sufficiently long English paragraph that must be translated.",
+        "中文开头。 This is a sufficiently long English paragraph that must be translated.",
+    )
 
 
 def test_cached_fallback_is_retried_after_translator_recovers() -> None:

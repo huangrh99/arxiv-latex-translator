@@ -466,8 +466,6 @@ def looks_untranslated(original: str, translated: str, *, require_no_cjk: bool =
     original_words = re.findall(r"[A-Za-z][A-Za-z'-]*", original_text)
     if len(original_words) < 8:
         return False
-    if require_no_cjk and re.search(r"[\u3400-\u9fff]", translated_text):
-        return False
     if original_text.strip() == translated_text.strip():
         return True
     source_normalized = " ".join(original_words).casefold()
