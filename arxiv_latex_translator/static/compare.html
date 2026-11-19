@@ -126,11 +126,16 @@
       function apiUrl(path) { return `${apiBase}${path}`; }
       function escapeHtml(value) { return String(value).replace(/[&<>'"]/g, character => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[character])); }
       function tokenSummary(job) {
-        if (!Number.isFinite(job.total_tokens)) return '';
+        const total = Number(job.total_tokens);
+        if (!Number.isFinite(total)) return '';
         const input = Number(job.input_tokens) || 0;
         const cached = Number(job.cached_input_tokens) || 0;
         const output = Number(job.output_tokens) || 0;
-        return `累计 ${job.total_tokens} tokens（新输入 ${Math.max(0, input - cached)}，输出 ${output}）`;
+        const reasoning = Number(job.reasoning_output_tokens) || 0;
+        const cost = Number(job.cost_usd);
+        const model = job.pricing_model ? `（${job.pricing_model} Standard）` : '';
+        const costText = Number.isFinite(cost) ? `，估算成本 $${cost.toFixed(6)} USD${model}` : '';
+        return `累计 ${total} tokens（输入 ${input}，缓存输入 ${cached}，未缓存输入 ${Math.max(0, input - cached)}，输出 ${output}，其中推理 ${reasoning}${costText}）`;
       }
 
       function setMode(mode) {

@@ -18,6 +18,7 @@ from typing import Any
 from .arxiv import ArxivIdentifier, download_source, extract_source, find_main_tex, parse_arxiv_input
 from .compiler import compile_latex
 from .latex import ProtectedRegionError, _read_balanced, looks_untranslated, strip_latex_comments, tokenize_latex, translate_latex
+from .pricing import configured_pricing_model, token_cost
 from .translator import CodexCliTranslator, TokenUsage, TranslationError
 
 
@@ -49,6 +50,7 @@ class Job:
     appendix_files: list[str] = field(default_factory=list)
     translate_appendix: bool = False
     config_key: str = ""
+    pricing_model: str = ""
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
 
@@ -69,6 +71,14 @@ class Job:
             value["source_url"] = f"/api/jobs/{self.id}/source"
         if self.log_path:
             value["log_url"] = f"/api/jobs/{self.id}/log"
+        value.update(
+            token_cost(
+                self.input_tokens,
+                self.cached_input_tokens,
+                self.output_tokens,
+                model=self.pricing_model or configured_pricing_model(),
+            )
+        )
         return value
 
 
@@ -106,6 +116,8 @@ class JobManager:
                 for path_value in (job.pdf_path, job.source_path, job.log_path):
                     if path_value and base not in Path(path_value).resolve().parents:
                         raise ValueError("任务记录包含工作目录之外的路径")
+                if not job.pricing_model:
+                    job.pricing_model = configured_pricing_model()
                 if job.status in {"queued", "running"}:
                     job.status = "failed"
                     job.phase = "failed"
@@ -215,7 +227,13 @@ class JobManager:
                 return existing
             if existing and existing.status == "failed" and not force:
                 return existing
-            job = Job(id=job_id, source=source, arxiv_id=identifier.value, config_key=self._config_key())
+            job = Job(
+                id=job_id,
+                source=source,
+                arxiv_id=identifier.value,
+                config_key=self._config_key(),
+                pricing_model=configured_pricing_model(),
+            )
             job.attempts = (existing.attempts if existing else 0) + 1
             self._jobs[job.id] = job
             self._persist(job)
@@ -683,7 +701,7 @@ Compiler log:
             usage = translator.total_usage
             self._log(
                 log_path,
-                "translated files={} chunks={} characters={} fallbacks={} input_tokens={} cached_input_tokens={} output_tokens={} reasoning_output_tokens={} total_tokens={}".format(
+                "translated files={} chunks={} characters={} fallbacks={} input_tokens={} cached_input_tokens={} output_tokens={} reasoning_output_tokens={} total_tokens={} cost_usd={}".format(
                     len(tex_files),
                     total_chunks,
                     total_characters,
@@ -693,6 +711,11 @@ Compiler log:
                     usage.output_tokens,
                     usage.reasoning_output_tokens,
                     usage.total_tokens,
+                    token_cost(
+                        usage.input_tokens,
+                        usage.cached_input_tokens,
+                        usage.output_tokens,
+                    )["cost_usd"],
                 ),
             )
 

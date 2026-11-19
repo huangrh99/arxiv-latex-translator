@@ -21,7 +21,8 @@ def test_completed_job_paths_survive_restart_without_api_leak(tmp_path: Path) ->
     assert reloaded.to_dict()["original_pdf_url"] == "https://arxiv.org/pdf/2401.12345"
 
 
-def test_token_usage_fields_survive_restart(tmp_path: Path) -> None:
+def test_token_usage_fields_survive_restart(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("CODEX_MODEL", "gpt-6.2-sol")
     manager = JobManager(tmp_path / "jobs")
     job = Job(
         id="job-usage",
@@ -39,6 +40,10 @@ def test_token_usage_fields_survive_restart(tmp_path: Path) -> None:
     assert reloaded is not None
     assert reloaded.total_tokens == 130
     assert reloaded.cached_input_tokens == 20
+    payload = reloaded.to_dict()
+    assert payload["uncached_input_tokens"] == 80
+    assert payload["cost_usd"] == 0.000462
+    assert payload["pricing_model"] == "gpt-6.2-sol"
 
 
 def test_codex_auth_failure_is_exposed_as_disconnected(tmp_path: Path) -> None:

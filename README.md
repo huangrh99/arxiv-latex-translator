@@ -59,7 +59,24 @@ tailscale serve --bg --set-path /arxiv-translator 8000
 
 然后把生成的 HTTPS 地址和路径写入个人主页仓库的 `arxiv-translator/config.js`。访问页面的设备需要加入同一个 tailnet。当前 GitHub Pages 前端只保存代码，任务目录、PDF、源码归档和日志都保存在 Mac mini 的 `ARXIV_OUTPUT_DIR` 中。
 
-任务状态会记录 Codex CLI 返回的 `input_tokens`、`cached_input_tokens`、`output_tokens`、`reasoning_output_tokens` 和 `total_tokens`。其中 `total_tokens` 按输入 token 加输出 token 计算，`cached_input_tokens` 是输入 token 的缓存子集。页面同时显示未缓存的新输入和输出，方便区分实际新增上下文与累计调用量。
+任务状态会分别记录 `input_tokens`、`cached_input_tokens`、`output_tokens`、`reasoning_output_tokens` 和 `total_tokens`。`input_tokens` 是本次累计的全部输入，`cached_input_tokens` 是其中的缓存子集，未缓存输入按 `max(input_tokens - cached_input_tokens, 0)` 计算。`output_tokens` 已包含推理输出，`reasoning_output_tokens` 只作为输出明细展示，不能再次加到总量或成本中。`total_tokens` 按 `input_tokens + output_tokens` 计算，因此不会把缓存输入或推理输出重复计算。OpenAI 的推理模型文档说明推理 tokens 计入 output tokens 并按输出费率计费。
+
+页面会按 OpenAI API 的 Standard 短上下文费率显示美元成本估算。成本公式是：
+
+```text
+未缓存输入 / 1,000,000 × 输入单价
++ 缓存输入 / 1,000,000 × 缓存输入单价
++ 输出 / 1,000,000 × 输出单价
+```
+
+当前费率如下，单价均为每 1M tokens：
+
+| 模型 | 输入 | 缓存输入 | 输出 |
+| --- | ---: | ---: | ---: |
+| `gpt-6.2-sol` | $2.00 | $0.10 | $10.00 |
+| `gpt-6-sol` | $2.00 | $0.20 | $10.00 |
+
+成本显示为 API 等价的估算值，不包含缓存写入费、工具调用费、长上下文、Batch、Fast 或区域处理附加费。任务会按照 `CODEX_MODEL` 选择价格，未设置时按服务默认的 `gpt-6.2-sol` 显示估算。页面、历史列表和阅读页都会显示输入、缓存输入、未缓存输入、输出、推理输出、总量和估算成本。费率以 [OpenAI API Pricing](https://developers.openai.com/api/docs/pricing)、[GPT-6.2 Sol 模型页](https://developers.openai.com/api/docs/models/gpt-6.2-sol)、[GPT-6 Sol 模型页](https://developers.openai.com/api/docs/models/gpt-6-sol) 和 [推理模型计费说明](https://developers.openai.com/api/docs/guides/reasoning) 为准。
 
 ## Codex CLI 配置
 
