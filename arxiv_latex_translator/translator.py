@@ -125,6 +125,35 @@ def _clean_output(output: str) -> str:
     return value
 
 
+def _summarize_cli_failure(output: str) -> str:
+    """Extract the useful failure message from Codex JSON event output."""
+
+    messages: list[str] = []
+    for line in output.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if event.get("type") != "turn.failed":
+            continue
+        error = event.get("error")
+        if isinstance(error, dict):
+            message = error.get("message")
+        else:
+            message = error
+        if isinstance(message, str):
+            try:
+                nested = json.loads(message)
+            except json.JSONDecodeError:
+                nested = None
+            if isinstance(nested, dict):
+                message = nested.get("error", {}).get("message") or nested.get("detail") or message
+            messages.append(message)
+    if messages:
+        return messages[-1].strip()
+    return output.strip()[-2000:]
+
+
 def _extract_json_message(output: str) -> str | None:
     message, _ = _extract_json_result(output)
     return message
@@ -188,7 +217,7 @@ class CodexCliTranslator:
             raise TranslationError(f"无法启动 Codex CLI：{exc}") from exc
         self.last_stderr = result.stderr or ""
         if result.returncode != 0:
-            detail = (result.stderr or result.stdout or "未知错误").strip()
+            detail = _summarize_cli_failure(result.stderr or result.stdout or "未知错误")
             raise TranslationError(f"Codex CLI 返回码 {result.returncode}：{detail[-2000:]}")
         return result.stdout or ""
 

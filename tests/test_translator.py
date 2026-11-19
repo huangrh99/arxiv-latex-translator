@@ -2,7 +2,7 @@ import subprocess
 from pathlib import Path
 
 from arxiv_latex_translator.compiler import _ensure_cjk_support, compile_latex, compiler_command
-from arxiv_latex_translator.translator import CodexConfig, CodexCliTranslator, build_codex_command, build_codex_repair_command
+from arxiv_latex_translator.translator import CodexConfig, CodexCliTranslator, _summarize_cli_failure, build_codex_command, build_codex_repair_command
 
 
 def test_codex_command_is_non_interactive_and_read_only() -> None:
@@ -50,6 +50,11 @@ def test_codex_adapter_uses_injected_runner() -> None:
     assert translator.last_usage.cached_input_tokens == 4
     assert translator.last_usage.output_tokens == 7
     assert translator.total_usage.total_tokens == 19
+
+
+def test_codex_failure_summarizes_nested_json_error() -> None:
+    output = '{"type":"turn.failed","error":{"message":"{\\"detail\\":\\"model unavailable\\",\\"error\\":{\\"message\\":\\"Selected model is at capacity.\\"}}"}}'
+    assert _summarize_cli_failure(output) == "Selected model is at capacity."
 
 
 def test_compiler_command_disables_shell_escape(monkeypatch, tmp_path: Path) -> None:
