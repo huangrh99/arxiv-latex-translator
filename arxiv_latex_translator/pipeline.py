@@ -471,10 +471,13 @@ Compiler log:
             for index, tex_file in enumerate(tex_files, start=1):
                 relative_name = str(tex_file.relative_to(translated_dir))
                 appendix_file = self._is_appendix_file(relative_name)
+                source_tex_file = extracted_dir / tex_file.relative_to(translated_dir)
                 if appendix_file and not job.translate_appendix:
+                    original_appendix = source_tex_file.read_text(encoding="utf-8", errors="replace")
+                    if tex_file.read_text(encoding="utf-8", errors="replace") != original_appendix:
+                        tex_file.write_text(original_appendix, encoding="utf-8")
                     appendix_files.add(relative_name)
                     continue
-                source_tex_file = extracted_dir / tex_file.relative_to(translated_dir)
                 original = source_tex_file.read_text(encoding="utf-8", errors="replace")
                 if relative_name in translated_files:
                     translated_existing = tex_file.read_text(encoding="utf-8", errors="replace")
