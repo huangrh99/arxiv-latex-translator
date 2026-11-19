@@ -83,6 +83,7 @@ GitHub public repository 只包含程序源码、静态前端和测试。Codex �
 | --- | --- | --- |
 | `CODEX_EXECUTABLE` | `codex` | Codex 可执行文件 |
 | `CODEX_MODEL` | 空 | `--model` 值 |
+| `CODEX_FALLBACK_MODEL` | 空 | Codex 临时容量错误时切换的备用 `--model` 值 |
 | `CODEX_PROFILE` | 空 | `--profile` 值 |
 | `CODEX_WORKDIR` | 空 | Codex 工作目录 |
 | `CODEX_EXTRA_ARGS` | 空 | 额外 CLI 参数 |
