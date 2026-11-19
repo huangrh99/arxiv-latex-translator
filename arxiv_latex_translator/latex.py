@@ -463,6 +463,15 @@ def looks_untranslated(original: str, translated: str, *, require_no_cjk: bool =
     return False
 
 
+def _plain_translation_valid(original: str, translated: str) -> bool:
+    if re.search(r"[\u3400-\u9fff]", translated):
+        return True
+    source_words = re.findall(r"[A-Za-z][A-Za-z'-]*", original)
+    if len(source_words) <= 2 and re.search(r"\d|[-_/]", original) and original.strip() == translated.strip():
+        return True
+    return False
+
+
 def _separate_control_words(text: str) -> str:
     """Keep TeX control words from consuming adjacent CJK text."""
 
@@ -574,10 +583,15 @@ def translate_latex(
         else:
             assert last_error is not None
             plain_parts = re.split(r"(LATEXPROT\d{4}X)", content)
-            prose_parts = [part for part in plain_parts if not re.fullmatch(r"LATEXPROT\d{4}X", part) and len(re.findall(r"[A-Za-z][A-Za-z'-]*", part)) >= 4]
+            prose_parts = [part for part in plain_parts if not re.fullmatch(r"LATEXPROT\d{4}X", part) and re.search(r"[A-Za-z][A-Za-z'-]*", part)]
             recovered_parts: list[str] = []
             recovered_any = bool(prose_parts)
             try:
+                if not recovered_any:
+                    # This chunk has no substantial prose. Preserve its protected
+                    # LaTeX and short technical text without inventing a translation.
+                    translated = _replace_markers(content, protected)
+                    return chunk_index, translated, {"source_hash": source_hash, "translated": translated, "fallback": "0"}, 0, (worker.total_usage if independent else None)
                 separator = "\nLATEXPLAINSEGMENT\n"
                 plain_prompt = PLAIN_TRANSLATION_PROMPT.format(content=separator.join(prose_parts))
                 plain_prompt += "\nPreserve every LATEXPLAINSEGMENT separator exactly once and in order."
@@ -587,7 +601,7 @@ def translate_latex(
                     translated_prose = worker.translate(plain_prompt, cwd=cwd)
                     translated_segments = translated_prose.split(separator)
                     if len(translated_segments) == len(prose_parts) and all(
-                        not looks_untranslated(source_part, translated_part, require_no_cjk=True)
+                        _plain_translation_valid(source_part, translated_part)
                         for source_part, translated_part in zip(prose_parts, translated_segments)
                     ):
                         break
@@ -596,7 +610,7 @@ def translate_latex(
                     raise ProtectedRegionError("纯文本恢复翻译仍保留了原文英文或改变了分段分隔符")
                 prose_index = 0
                 for part in plain_parts:
-                    if re.fullmatch(r"LATEXPROT\d{4}X", part) or len(re.findall(r"[A-Za-z][A-Za-z'-]*", part)) < 4:
+                    if re.fullmatch(r"LATEXPROT\d{4}X", part) or not re.search(r"[A-Za-z][A-Za-z'-]*", part):
                         recovered_parts.append(part)
                     else:
                         recovered_parts.append(translated_segments[prose_index])
