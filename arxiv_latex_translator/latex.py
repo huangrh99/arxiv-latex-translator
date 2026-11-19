@@ -421,6 +421,8 @@ def _replace_markers(output: str, protected: dict[str, str]) -> str:
     actual = re.findall(r"LATEXPROT\d{4}X", output)
     if len(actual) != len(expected):
         raise ProtectedRegionError("翻译结果中的保护标记数量异常")
+    if actual != expected:
+        raise ProtectedRegionError("翻译结果中的保护标记顺序发生变化")
     for marker, expected_marker in zip(actual, expected):
         output = output.replace(marker, protected[expected_marker], 1)
     leftovers = re.findall(r"LATEXPROT\d{4}X", output)
@@ -523,7 +525,12 @@ def translate_latex(
             and cached.get("fallback", "0") != "1"
             and isinstance(cached.get("translated"), str)
         ):
-            if not looks_untranslated(content, cached["translated"], require_no_cjk=True):
+            cache_structure_valid = True
+            try:
+                validate_protected_structure(content, cached["translated"])
+            except ProtectedRegionError:
+                cache_structure_valid = False
+            if cache_structure_valid and not looks_untranslated(content, cached["translated"], require_no_cjk=True):
                 translated_chunks[chunk_index] = cached["translated"]
                 translated_characters += len(content)
                 fallback_count += int(cached.get("fallback", "0") or 0)

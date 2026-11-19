@@ -52,10 +52,14 @@ def test_href_url_stays_protected_and_optional_caption_text_is_translatable() ->
 
 def test_marker_order_changes_are_rebound_to_original_protected_tokens() -> None:
     class ReorderingTranslator:
+        def __init__(self):
+            self.calls = 0
+
         def translate(self, prompt: str, *, cwd=None) -> str:
             content = prompt.split("<latex>\n", 1)[1].rsplit("\n</latex>", 1)[0]
             markers = __import__("re").findall(r"LATEXPROT\d{4}X", content)
-            if len(markers) >= 2:
+            self.calls += 1
+            if self.calls == 1 and len(markers) >= 2:
                 content = content.replace(markers[0], "TEMP", 1).replace(markers[1], markers[0], 1).replace("TEMP", markers[1], 1)
             return content
 
