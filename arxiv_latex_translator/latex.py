@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Callable, Protocol
+
+from .translator import TranslationError
 
 class ChunkTranslator(Protocol):
     def translate(self, prompt: str, *, cwd=None) -> str:
@@ -485,6 +488,26 @@ def _plain_translation_valid(original: str, translated: str) -> bool:
     return False
 
 
+def _is_retryable_translation_error(error: TranslationError) -> bool:
+    detail = str(error).casefold()
+    return any(
+        marker in detail
+        for marker in (
+            "at capacity",
+            "request timed out",
+            "timeout",
+            "rate limit",
+            "too many requests",
+            "temporarily unavailable",
+            "connection reset",
+            "websocket",
+            "返回码 502",
+            "返回码 503",
+            "返回码 504",
+        )
+    )
+
+
 def _separate_control_words(text: str) -> str:
     """Keep TeX control words from consuming adjacent CJK text."""
 
@@ -573,11 +596,11 @@ def translate_latex(
 
         prompt = TRANSLATION_PROMPT.format(content=content)
         translated = ""
-        last_error: ProtectedRegionError | None = None
+        last_error: Exception | None = None
         chunk_fallback = False
         marker_order = ", ".join(protected)
         retry_prompt = prompt + f"\nThe required marker sequence is exactly: {marker_order}\n"
-        for _ in range(3):
+        for attempt in range(3):
             try:
                 translated = worker.translate(retry_prompt, cwd=cwd)
                 translated = _replace_markers(translated, protected)
@@ -585,6 +608,12 @@ def translate_latex(
                 if looks_untranslated(translatable_content, re.sub(r"LATEXPROT\d{4}X", "", translated), require_no_cjk=True):
                     raise ProtectedRegionError("翻译结果保留了与原文高度相似的英文段落，疑似未翻译")
                 break
+            except TranslationError as exc:
+                if not _is_retryable_translation_error(exc):
+                    raise
+                last_error = exc
+                if attempt < 2:
+                    time.sleep(2 ** (attempt + 1))
             except ProtectedRegionError as exc:
                 last_error = exc
                 retry_prompt += (
@@ -595,6 +624,8 @@ def translate_latex(
                 )
         else:
             assert last_error is not None
+            if isinstance(last_error, TranslationError):
+                raise last_error
             plain_parts = re.split(r"(LATEXPROT\d{4}X)", content)
             prose_parts = [part for part in plain_parts if not re.fullmatch(r"LATEXPROT\d{4}X", part) and re.search(r"[A-Za-z][A-Za-z'-]*", part)]
             recovered_parts: list[str] = []

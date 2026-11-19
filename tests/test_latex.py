@@ -6,7 +6,7 @@ import threading
 import time
 
 from arxiv_latex_translator.latex import looks_untranslated, tokenize_latex, translate_latex, validate_protected_structure
-from arxiv_latex_translator.translator import CodexCliTranslator, CodexConfig
+from arxiv_latex_translator.translator import CodexCliTranslator, CodexConfig, TranslationError
 
 
 class FakeTranslator:
@@ -170,6 +170,23 @@ def test_untranslated_detector_ignores_short_technical_text() -> None:
         "中文开头。 This is a sufficiently long English paragraph that must be translated.",
         "中文开头。 This is a sufficiently long English paragraph that must be translated.",
     )
+
+
+def test_transient_codex_capacity_error_is_retried() -> None:
+    class FlakyTranslator:
+        def __init__(self):
+            self.calls = 0
+
+        def translate(self, prompt: str, *, cwd=None) -> str:
+            self.calls += 1
+            if self.calls == 1:
+                raise TranslationError("Codex CLI 返回码 1: Selected model is at capacity")
+            return prompt.split("<latex>\n", 1)[1].rsplit("\n</latex>", 1)[0].replace("English", "中文")
+
+    translator = FlakyTranslator()
+    translated, _ = translate_latex("English prose that is long enough to translate.", translator)
+    assert "中文" in translated
+    assert translator.calls == 2
 
 
 def test_cached_fallback_is_retried_after_translator_recovers() -> None:
