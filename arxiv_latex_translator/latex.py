@@ -615,7 +615,7 @@ def translate_latex(
                 translated_segments: list[str] = []
                 for _ in range(3):
                     translated_prose = worker.translate(plain_prompt, cwd=cwd)
-                    translated_segments = translated_prose.split(separator)
+                    translated_segments = re.split(r"\s*LATEXPLAINSEGMENT\s*", translated_prose.strip())
                     if len(translated_segments) == len(prose_parts) and all(
                         _plain_translation_valid(source_part, translated_part)
                         for source_part, translated_part in zip(prose_parts, translated_segments)
