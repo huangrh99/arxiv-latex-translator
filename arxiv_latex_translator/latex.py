@@ -574,24 +574,33 @@ def translate_latex(
         else:
             assert last_error is not None
             plain_parts = re.split(r"(LATEXPROT\d{4}X)", content)
+            prose_parts = [part for part in plain_parts if not re.fullmatch(r"LATEXPROT\d{4}X", part) and len(re.findall(r"[A-Za-z][A-Za-z'-]*", part)) >= 4]
             recovered_parts: list[str] = []
-            recovered_any = False
+            recovered_any = bool(prose_parts)
             try:
+                separator = "\nLATEXPLAINSEGMENT\n"
+                plain_prompt = PLAIN_TRANSLATION_PROMPT.format(content=separator.join(prose_parts))
+                plain_prompt += "\nPreserve every LATEXPLAINSEGMENT separator exactly once and in order."
+                translated_prose = ""
+                translated_segments: list[str] = []
+                for _ in range(3):
+                    translated_prose = worker.translate(plain_prompt, cwd=cwd)
+                    translated_segments = translated_prose.split(separator)
+                    if len(translated_segments) == len(prose_parts) and all(
+                        not looks_untranslated(source_part, translated_part, require_no_cjk=True)
+                        for source_part, translated_part in zip(prose_parts, translated_segments)
+                    ):
+                        break
+                    plain_prompt += "\nThe previous response changed a separator or left a prose segment in English. Translate all segments again."
+                else:
+                    raise ProtectedRegionError("纯文本恢复翻译仍保留了原文英文或改变了分段分隔符")
+                prose_index = 0
                 for part in plain_parts:
                     if re.fullmatch(r"LATEXPROT\d{4}X", part) or len(re.findall(r"[A-Za-z][A-Za-z'-]*", part)) < 4:
                         recovered_parts.append(part)
-                        continue
-                    recovered_any = True
-                    plain_prompt = PLAIN_TRANSLATION_PROMPT.format(content=part)
-                    plain_translation = ""
-                    for _ in range(3):
-                        plain_translation = worker.translate(plain_prompt, cwd=cwd)
-                        if not looks_untranslated(part, plain_translation, require_no_cjk=True):
-                            break
-                        plain_prompt += "\nThe previous response was still mostly unchanged English. Translate the prose again."
                     else:
-                        raise ProtectedRegionError("纯文本恢复翻译仍保留了原文英文")
-                    recovered_parts.append(plain_translation)
+                        recovered_parts.append(translated_segments[prose_index])
+                        prose_index += 1
                 if not recovered_any:
                     raise last_error
                 translated = _replace_markers("".join(recovered_parts), protected)
