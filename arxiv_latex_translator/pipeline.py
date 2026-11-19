@@ -479,6 +479,13 @@ Compiler log:
                     appendix_files.add(relative_name)
                     continue
                 original = source_tex_file.read_text(encoding="utf-8", errors="replace")
+                if tex_file.name.casefold() == "preamble.tex":
+                    # Preamble files contain package setup and macro definitions.
+                    # They are structural LaTeX, not paper prose, and must stay byte-for-byte unchanged.
+                    tex_file.write_text(original, encoding="utf-8")
+                    translated_files.add(relative_name)
+                    self._update(job, translated_files=sorted(translated_files), appendix_files=sorted(appendix_files))
+                    continue
                 if relative_name in translated_files:
                     translated_existing = tex_file.read_text(encoding="utf-8", errors="replace")
                     if not looks_untranslated(original, translated_existing):
