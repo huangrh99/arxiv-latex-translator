@@ -612,8 +612,11 @@ def translate_latex(
                 if not _is_retryable_translation_error(exc):
                     raise
                 last_error = exc
-                if attempt < 2:
+                switched_model = hasattr(worker, "use_fallback_model") and worker.use_fallback_model()
+                if attempt < 2 and not switched_model:
                     time.sleep(2 ** (attempt + 1))
+                if switched_model:
+                    retry_prompt += "\nThe primary Codex model was temporarily unavailable. Continue this same translation with the configured fallback model."
             except ProtectedRegionError as exc:
                 last_error = exc
                 retry_prompt += (

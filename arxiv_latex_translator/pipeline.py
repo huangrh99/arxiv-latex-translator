@@ -169,6 +169,7 @@ class JobManager:
             for name in (
                 "CODEX_EXECUTABLE",
                 "CODEX_MODEL",
+                "CODEX_FALLBACK_MODEL",
                 "CODEX_PROFILE",
                 "CODEX_EXTRA_ARGS",
                 "CODEX_CHUNK_CHARS",

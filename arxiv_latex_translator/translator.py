@@ -6,7 +6,7 @@ import os
 import json
 import shlex
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Sequence
 
@@ -39,6 +39,7 @@ class TokenUsage:
 class CodexConfig:
     executable: str = "codex"
     model: str | None = None
+    fallback_model: str | None = None
     profile: str | None = None
     workdir: Path | None = None
     extra_args: tuple[str, ...] = ()
@@ -58,6 +59,7 @@ class CodexConfig:
         return cls(
             executable=os.environ.get("CODEX_EXECUTABLE", "codex"),
             model=os.environ.get("CODEX_MODEL") or None,
+            fallback_model=os.environ.get("CODEX_FALLBACK_MODEL") or None,
             profile=os.environ.get("CODEX_PROFILE") or None,
             workdir=Path(workdir_value).expanduser() if workdir_value else None,
             extra_args=extra,
@@ -66,7 +68,7 @@ class CodexConfig:
         )
 
     def cache_key(self) -> str:
-        return "|".join((self.executable, self.model or "", self.profile or "", self.reasoning_effort, *self.extra_args))
+        return "|".join((self.executable, self.model or "", self.fallback_model or "", self.profile or "", self.reasoning_effort, *self.extra_args))
 
 
 def build_codex_command(config: CodexConfig) -> list[str]:
@@ -166,6 +168,7 @@ class CodexCliTranslator:
         self.last_stderr = ""
         self.last_usage = TokenUsage()
         self.total_usage = TokenUsage()
+        self._fallback_used = False
 
     def _run(self, command: list[str], prompt: str, *, cwd: Path | None) -> str:
         run_cwd = cwd or self.config.workdir
@@ -204,6 +207,13 @@ class CodexCliTranslator:
         """Create an independent translator for a parallel chunk call."""
 
         return CodexCliTranslator(self.config, runner=self.runner)
+
+    def use_fallback_model(self) -> bool:
+        if self._fallback_used or not self.config.fallback_model:
+            return False
+        self.config = replace(self.config, model=self.config.fallback_model)
+        self._fallback_used = True
+        return True
 
     def repair(self, prompt: str, *, cwd: Path | None = None) -> str:
         output_text = self._run(build_codex_repair_command(self.config), prompt, cwd=cwd)

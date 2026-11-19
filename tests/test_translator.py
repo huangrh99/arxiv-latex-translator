@@ -14,6 +14,13 @@ def test_codex_command_is_non_interactive_and_read_only() -> None:
     assert command[-1] == "-"
 
 
+def test_codex_translator_switches_to_fallback_model() -> None:
+    translator = CodexCliTranslator(CodexConfig(model="primary", fallback_model="fallback"))
+    assert translator.use_fallback_model() is True
+    assert translator.config.model == "fallback"
+    assert translator.use_fallback_model() is False
+
+
 def test_codex_repair_command_is_workspace_scoped() -> None:
     command = build_codex_repair_command(CodexConfig(model="gpt-test"))
     assert command[:2] == ["codex", "exec"]
