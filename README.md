@@ -94,13 +94,20 @@ tailscale serve --bg --set-path /arxiv-translator 8000
 | `CODEX_CHUNK_CHARS` | `1000` | 按完整 LaTeX 行累积到目标字符数后切块 |
 | `CODEX_MAX_PARALLEL_CHUNKS` | `3` | 同一 TeX 文件同时翻译的块数 |
 | `CODEX_REASONING_EFFORT` | `medium` | Codex CLI 的 reasoning effort |
-| `ARXIV_MAX_COMPILE_REPAIRS` | `3` | 编译失败后自动调用 Codex 修复的最大次数 |
+| `ARXIV_MAX_COMPILE_REPAIRS` | `3` | 编译失败或编译检查发现问题后自动调用 Codex 修复的最大次数 |
+| `ARXIV_REPAIR_SKILL_DIR` | 数据目录旁的 `skills/arxiv-latex-repair` | 编译修复经验（`SKILL.md`）的存放目录 |
 
 ## LaTeX 配置
 
 默认优先使用 `latexmk -xelatex`，其次使用 `xelatex`，最后使用 `tectonic`。可以用 `LATEX_COMMAND` 指定完整命令，例如 `LATEX_COMMAND='latexmk -xelatex'`。编译超时由 `LATEX_TIMEOUT_SECONDS` 控制。
 
 编译失败后，服务会自动让 Codex 根据编译日志修复当前翻译目录并重新编译，最多自动尝试 3 次。每次修复都会保留日志和翻译工作目录。自动修复仍失败时，页面只提供复用源码重试和查看日志。
+
+编译返回成功后，服务还会读取本次编译的 `.log` 和 `.blg`，检查未定义的引用和交叉引用（PDF 中显示为 `??`）、BibTeX 找不到 `.bib` 数据库，以及字体缺字。问题达到阈值时同样交给 Codex 修复并重新编译检查；修复次数用完仍未解决的问题会作为警告显示在页面上。
+
+每次修复都会带上一份修复经验 `SKILL.md`。仓库中的 `arxiv_latex_translator/skills/arxiv-latex-repair/SKILL.md` 是初始版本，服务首次使用时复制到数据目录。Codex 修复成功后会判断这次是否有新的论文 LaTeX 处理经验，有则追加一条，没有则不改动；流水线本身的缺陷直接修改代码，不写入经验。
+
+已完成的任务可以调用 `POST /api/jobs/{id}/recheck`，在不重新翻译的情况下重新编译、检查并修复。
 
 检测到中文内容时，编译器会扫描主文件及其 `\input`、`\include` 子文件，为没有 CJK 支持的文档注入 `xeCJK` 和 macOS 的 `Songti SC` 字体设置，并关闭 `microtype` 的自动字形探测，避免中文字体触发 XeTeX 错误。使用自定义编译命令时，需要确保该命令支持 XeLaTeX 和 CJK 字体。
 
@@ -110,7 +117,7 @@ tailscale serve --bg --set-path /arxiv-translator 8000
 
 资源保护可以通过 `ARXIV_MAX_DOWNLOAD_BYTES`、`ARXIV_MAX_ARCHIVE_BYTES`、`ARXIV_MAX_EXTRACTED_BYTES`、`ARXIV_MAX_EXTRACTED_FILES` 和 `ARXIV_MAX_CONCURRENT_JOBS` 调整。默认值分别为 200 MiB、200 MiB、512 MiB、10000 个文件和 1 个并发任务。
 
-首页的「历史翻译」列表读取已持久化任务，支持按 arXiv ID、输入链接或任务 ID搜索。接口为 `GET /api/jobs?query=关键词`。
+首页的「历史翻译」列表读取已持久化任务，显示论文标题（来自 arXiv API），支持按标题、arXiv ID、输入链接或任务 ID 搜索。接口为 `GET /api/jobs?query=关键词`。每个任务记录实际运行耗时（不含排队，重试和附录翻译累加）。
 
 后端状态接口为 `GET /api/status`，返回最近一次 Codex CLI 调用的状态。`未验证`表示服务启动后还没有新的实际调用，`已连接`表示最近一次调用成功，`认证失效`和`调用错误`会显示最近一次失败原因。
 
@@ -120,7 +127,7 @@ tailscale serve --bg --set-path /arxiv-translator 8000
 
 翻译默认跳过路径或文件名包含 `appendix` 的 TeX 文件，也会跳过同一 TeX 文件中 `\appendix` 后面的内容，以减少首次翻译的 token 消耗。主文完成后，页面会显示「继续翻译 Appendix」按钮，点击后只处理这些 Appendix 内容并重新编译 PDF。每个 TeX 文件的已完成片段会写入任务目录的缓存，重试时不会重复调用 Codex。
 
-如果 Codex 破坏保护标记，系统会把具体校验错误反馈给 Codex，并在同一片段内重新翻译，最多尝试三次。三次都失败时任务会失败并保留源码缓存，错误片段不会被当作已翻译内容缓存，也不会悄悄以英文原文完成 PDF。点击「复用源码重试」后只会继续未完成的片段。
+翻译按句进行：每个片段先切成编号的句子，Codex 逐句返回译文，不合并、不拆分、不整段改写。每句单独校验，只把有问题的句子连同具体原因（缺少或重复的保护标记、在标记外写了 LaTeX、仍是英文）发回重译，最多三次。三次都失败时任务失败并保留缓存和失败原因，错误译文不会被缓存为成功结果。点击「复用源码重试」后只继续未完成的片段，并把上次的失败原因带给 Codex。
 
 ## 保护规则
 

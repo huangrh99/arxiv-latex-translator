@@ -211,6 +211,17 @@ class TranslatorHandler(BaseHTTPRequestHandler):
                 return
             self._json(job.to_dict(), HTTPStatus.ACCEPTED)
             return
+        if len(parts) == 5 and parts[1:3] == ["api", "jobs"] and parts[4] == "recheck":
+            try:
+                job = self.manager.recheck(parts[3])
+            except KeyError:
+                self._json({"error": "任务不存在"}, HTTPStatus.NOT_FOUND)
+                return
+            except RuntimeError as exc:
+                self._json({"error": str(exc)}, HTTPStatus.CONFLICT)
+                return
+            self._json(job.to_dict(), HTTPStatus.ACCEPTED)
+            return
         if len(parts) == 5 and parts[1:3] == ["api", "jobs"] and parts[4] == "repair":
             try:
                 job = self.manager.repair_compile(parts[3])
@@ -238,6 +249,7 @@ def create_server(host: str | None = None, port: int | None = None, manager: Job
 
 def main() -> None:
     server = create_server()
+    server.RequestHandlerClass.manager.start_title_backfill()
     print(f"ArXiv LaTeX Translator listening on http://{server.server_address[0]}:{server.server_address[1]}")
     try:
         server.serve_forever()

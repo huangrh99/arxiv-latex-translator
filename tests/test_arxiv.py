@@ -32,3 +32,41 @@ def test_extract_source_and_find_document_root(tmp_path: Path) -> None:
             archive.addfile(info, io.BytesIO(data))
     extracted = extract_source(archive_path, tmp_path / "extracted")
     assert find_main_tex(extracted).name == "main.tex"
+
+
+def test_fetch_title_reads_entry_title_from_arxiv_api() -> None:
+    import io
+
+    from arxiv_latex_translator.arxiv import fetch_title, parse_arxiv_input
+
+    feed = b"""<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>arXiv Query: id_list=2611.12426</title>
+  <entry><title>dNaViT: Discrete Codes are
+      General-Purpose Visual Representations</title></entry>
+</feed>"""
+    requested = []
+
+    class Response(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    def opener(request, timeout):
+        requested.append(request.full_url)
+        return Response(feed)
+
+    title = fetch_title(parse_arxiv_input("2611.12426v1"), user_agent="test", opener=opener)
+    assert title == "dNaViT: Discrete Codes are General-Purpose Visual Representations"
+    assert "id_list=2611.12426" in requested[0]
+
+
+def test_fetch_title_returns_empty_string_on_failure() -> None:
+    from arxiv_latex_translator.arxiv import fetch_title, parse_arxiv_input
+
+    def opener(request, timeout):
+        raise OSError("offline")
+
+    assert fetch_title(parse_arxiv_input("2611.12426"), user_agent="test", opener=opener) == ""

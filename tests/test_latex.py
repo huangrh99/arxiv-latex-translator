@@ -151,7 +151,57 @@ def test_failed_chunk_is_not_cached_as_a_translation() -> None:
     cache = {}
     with pytest.raises(Exception):
         translate_latex(r"\section{Text} $x$", BrokenTranslator(), chunk_cache=cache)
-    assert cache == {}
+    assert all("translated" not in entry for entry in cache.values())
+    assert any("last_error" in entry for entry in cache.values())
+
+
+def test_resume_sends_previous_failure_reason_in_first_prompt() -> None:
+    class BrokenTranslator:
+        def translate(self, prompt: str, *, cwd=None) -> str:
+            return "broken output"
+
+    prompts: list[str] = []
+
+    class RecordingTranslator:
+        def translate(self, prompt: str, *, cwd=None) -> str:
+            prompts.append(prompt)
+            return "broken output"
+
+    source = r"\section{Text} with enough English words to need a real translation here $x$"
+    cache = {}
+    with pytest.raises(Exception):
+        translate_latex(source, BrokenTranslator(), chunk_cache=cache)
+    with pytest.raises(Exception):
+        translate_latex(source, RecordingTranslator(), chunk_cache=cache)
+    assert "A previous run of this chunk failed validation" in prompts[0]
+    assert "sentence is missing from the response" in prompts[0]
+
+
+def test_prompt_explains_markers_and_retry_names_the_bad_marker() -> None:
+    prompts: list[str] = []
+
+    class SwappingTranslator:
+        def translate(self, prompt: str, *, cwd=None) -> str:
+            prompts.append(prompt)
+            # Drop the citation marker every time.
+            body = prompt.rsplit("<latex>\n", 1)[1].split("\n</latex>", 1)[0]
+            return re.sub(r"LATEXPROT\d{4}X(?=\s*\.)", "", body).replace("shows", "显示")
+
+    with pytest.raises(Exception):
+        translate_latex(r"See \Cref{fig:a} which shows the results~\citep{smith}.", SwappingTranslator())
+    assert "cross-reference" in prompts[0]
+    assert "citation" in prompts[0]
+    assert "sentence 1: missing LATEXPROT" in prompts[1]
+
+
+def test_out_of_order_references_are_not_silently_swapped() -> None:
+    from arxiv_latex_translator.latex import ProtectedRegionError, _replace_markers
+
+    protected = {"LATEXPROT0001X": r"\Cref{fig:a}", "LATEXPROT0002X": r"\Cref{fig:b}"}
+    with pytest.raises(ProtectedRegionError):
+        _replace_markers("先看 LATEXPROT0002X 再看 LATEXPROT0001X", protected)
+    braces = {"LATEXPROT0001X": "}", "LATEXPROT0002X": "}"}
+    assert _replace_markers("a LATEXPROT0002X b LATEXPROT0001X", braces) == "a } b }"
 
 
 def test_untranslated_english_chunk_is_retried() -> None:
@@ -161,18 +211,46 @@ def test_untranslated_english_chunk_is_retried() -> None:
                 return prompt.split("<latex>\n", 1)[1].rsplit("\n</latex>", 1)[0]
             return prompt.split("<text>\n", 1)[1].rsplit("\n</text>", 1)[0]
 
-    with pytest.raises(Exception, match="英文段落"):
+    with pytest.raises(Exception, match="left untranslated"):
         translate_latex("This is a sufficiently long English paragraph that must be translated.", EchoTranslator())
 
 
-def test_plain_text_recovery_translates_a_chunk_after_marker_retries() -> None:
-    class MarkerEchoTranslator:
-        def translate(self, prompt: str, *, cwd=None) -> str:
-            content = prompt.split("<latex>\n", 1)[1].rsplit("\n</latex>", 1)[0] if "<latex>" in prompt else prompt.split("<text>\n", 1)[1].rsplit("\n</text>", 1)[0]
-            return content if "<latex>" in prompt else content.replace("English paragraph", "中文段落")
+def test_only_failed_sentences_are_sent_again() -> None:
+    prompts: list[str] = []
 
-    translated, _ = translate_latex("This is a sufficiently long English paragraph that must be translated. $x$", MarkerEchoTranslator())
-    assert "中文段落" in translated
+    class HalfTranslator:
+        def translate(self, prompt: str, *, cwd=None) -> str:
+            prompts.append(prompt)
+            body = prompt.split("<latex>\n", 1)[1].rsplit("\n</latex>", 1)[0]
+            if len(prompts) == 1:
+                # First answer translates sentence 1 but leaves sentence 2 in English.
+                return body.replace("The first sentence explains the method in great detail here.", "第一句详细解释了方法。")
+            return body.replace("The second sentence reports the experimental results across all benchmarks.", "第二句报告了所有基准上的实验结果。")
+
+    source = (
+        "The first sentence explains the method in great detail here. "
+        "The second sentence reports the experimental results across all benchmarks."
+    )
+    translated, _ = translate_latex(source, HalfTranslator())
+    assert translated == "第一句详细解释了方法。 第二句报告了所有基准上的实验结果。"
+    assert "<s 1>" not in prompts[1] and "<s 2>" in prompts[1]
+    assert "sentence 2: English text was left untranslated" in prompts[1]
+
+
+def test_standalone_markers_may_move_inside_a_sentence_but_pairs_may_not() -> None:
+    from arxiv_latex_translator.latex import check_sentence
+
+    protected = {"LATEXPROT0001X": "\\%", "LATEXPROT0002X": "\\emph{", "LATEXPROT0003X": "}"}
+    source = "It solves 30LATEXPROT0001X of LATEXPROT0002XStandardLATEXPROT0003X tests overall."
+    assert check_sentence(source, "在 LATEXPROT0002X标准LATEXPROT0003X 测试中共解决 30LATEXPROT0001X。", protected) is None
+    assert "paired" in check_sentence(source, "30LATEXPROT0001X LATEXPROT0003X标准LATEXPROT0002X 测试。", protected)
+    assert "LaTeX syntax" in check_sentence(source, "解决 30% LATEXPROT0001X 的 LATEXPROT0002X标准LATEXPROT0003X 测试。", protected)
+
+
+def test_validator_ignores_commands_that_become_adjacent() -> None:
+    from arxiv_latex_translator.latex import validate_protected_structure
+
+    validate_protected_structure("61\\% of the \\emph{Standard} runs", "61\\% \\emph{标准} 运行")
 
 
 def test_untranslated_detector_ignores_short_technical_text() -> None:
@@ -269,3 +347,40 @@ def test_inline_verbatim_and_protected_structure_are_preserved() -> None:
     validate_protected_structure(source, translated)
     assert r"\verb|a_b|" in translated
     assert r"\lstinline|x+y|" in translated
+
+
+LAYOUT_FIGURE = r"""\begin{figure}[t]
+  \centering
+  \setlength{\parskip}{0pt}
+  \captionsetup[sub]{skip=0pt,justification=centering}
+  \includegraphics[width=\linewidth]{figures/plot.pdf}\par
+  \nointerlineskip\vspace{-9pt}
+  \rlap{\makebox[\linewidth][c]{\smash{\raisebox{-23.8pt}{\includegraphics{figures/legend.pdf}}}}}
+  \begin{minipage}[t]{0.4621\linewidth}
+    \subcaption{VQA}
+  \end{minipage}
+  \caption{Scaling curves show that the encoder free model keeps improving with more data.}
+\end{figure}
+"""
+
+
+def test_layout_arguments_are_not_treated_as_untranslated_prose() -> None:
+    class ProseOnlyTranslator:
+        def translate(self, prompt: str, *, cwd=None) -> str:
+            body = prompt.split("<latex>\n", 1)[1].rsplit("\n</latex>", 1)[0]
+            # Translate the caption sentence only, as a careful translator would.
+            return body.replace(
+                "Scaling curves show that the encoder free model keeps improving with more data.",
+                "缩放曲线表明，无编码器模型随着数据增多持续提升。",
+            )
+
+    translated, _ = translate_latex(LAYOUT_FIGURE, ProseOnlyTranslator())
+    assert "skip=0pt,justification=centering" in translated
+    assert "缩放曲线表明" in translated
+
+
+def test_single_word_headings_still_need_translation() -> None:
+    from arxiv_latex_translator.latex import _needs_translation
+
+    assert _needs_translation("LATEXPROT0001XIntroductionLATEXPROT0002X")
+    assert not _needs_translation("LATEXPROT0001XtLATEXPROT0002X\n  LATEXPROT0003Xskip=0pt,justification=centeringLATEXPROT0004X 0pt")

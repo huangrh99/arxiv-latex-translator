@@ -81,6 +81,30 @@ def download_source(
     return destination
 
 
+def fetch_title(
+    identifier: ArxivIdentifier,
+    *,
+    user_agent: str,
+    timeout: float = 20.0,
+    opener: Callable[..., object] = urlopen,
+) -> str:
+    """Return the paper title from the arXiv API, or an empty string when it is unavailable."""
+
+    import xml.etree.ElementTree as ElementTree
+    from urllib.parse import quote
+
+    url = f"https://export.arxiv.org/api/query?id_list={quote(identifier.base_id)}"
+    try:
+        with opener(Request(url, headers={"User-Agent": user_agent}), timeout=timeout) as response:
+            root = ElementTree.fromstring(response.read())
+    except (OSError, ValueError, ElementTree.ParseError):
+        return ""
+    title = root.find("{http://www.w3.org/2005/Atom}entry/{http://www.w3.org/2005/Atom}title")
+    if title is None or not title.text:
+        return ""
+    return " ".join(title.text.split())
+
+
 def _safe_member_path(root: Path, member_name: str) -> Path:
     relative = Path(member_name)
     if relative.is_absolute() or ".." in relative.parts:
